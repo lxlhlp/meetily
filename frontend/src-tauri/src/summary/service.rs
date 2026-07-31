@@ -369,9 +369,20 @@ impl SummaryService {
                         )
                     }
                     Ok(None) => {
-                        let err_msg = "Custom OpenAI provider selected but no configuration found";
-                        Self::update_process_failed(&pool, &meeting_id, err_msg).await;
-                        return;
+                        // Fall back to the built-in internal deployment so
+                        // packaged builds work without manual configuration.
+                        let config = crate::summary::CustomOpenAIConfig::built_in_default();
+                        info!(
+                            "No saved custom OpenAI config, using built-in default endpoint: {}",
+                            config.endpoint
+                        );
+                        (
+                            Some(config.endpoint),
+                            config.api_key,
+                            config.max_tokens.map(|t| t as u32),
+                            config.temperature,
+                            config.top_p,
+                        )
                     }
                     Err(e) => {
                         let err_msg = format!("Failed to retrieve custom OpenAI config: {}", e);

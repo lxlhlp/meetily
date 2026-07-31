@@ -30,6 +30,21 @@ pub struct CustomOpenAIConfig {
     pub top_p: Option<f32>,
 }
 
+impl CustomOpenAIConfig {
+    /// Built-in default pointing at the internal Qwen3.6-27B deployment, so
+    /// packaged builds work without manual configuration.
+    pub fn built_in_default() -> Self {
+        Self {
+            endpoint: crate::config::DEFAULT_CUSTOM_OPENAI_ENDPOINT.to_string(),
+            api_key: Some(crate::config::DEFAULT_CUSTOM_OPENAI_API_KEY.to_string()),
+            model: crate::config::DEFAULT_CUSTOM_OPENAI_MODEL.to_string(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        }
+    }
+}
+
 pub mod commands;
 pub(crate) mod language_detection;
 pub mod llm_client;

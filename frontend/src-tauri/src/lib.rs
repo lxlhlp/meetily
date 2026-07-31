@@ -657,6 +657,10 @@ pub fn run() {
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
             api::api_test_custom_openai_connection,
+            // MOSS transcription server commands
+            api::api_save_moss_config,
+            api::api_get_moss_config,
+            api::api_test_moss_connection,
             // Summary commands
             summary::commands::api_process_transcript,
             summary::commands::api_get_summary,

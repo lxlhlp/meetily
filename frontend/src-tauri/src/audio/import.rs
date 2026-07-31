@@ -2,8 +2,10 @@
 
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
+use crate::audio::transcription::MossClient;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::database::repositories::setting::SettingsRepository;
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -13,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
@@ -191,7 +194,7 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
 
 /// Extract duration from audio file metadata without full decode
 /// Returns error if metadata is unavailable, triggering fallback to full decode
-fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
+pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
@@ -266,6 +269,7 @@ pub async fn start_import<R: Runtime>(
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_moss = provider.as_deref() == Some("moss");
     let result = run_import(
         app.clone(),
         source_path,
@@ -276,8 +280,11 @@ pub async fn start_import<R: Runtime>(
     )
     .await;
 
-    // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    // Unload the engine after the batch job (success, failure, or cancellation).
+    // MOSS is a remote HTTP engine - nothing local was loaded, nothing to unload.
+    if !use_moss {
+        super::common::unload_engine_after_batch(use_parakeet).await;
+    }
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -368,6 +375,12 @@ async fn run_import<R: Runtime>(
         // Cleanup: remove the meeting folder
         let _ = std::fs::remove_dir_all(&meeting_folder);
         return Err(anyhow!("Import cancelled"));
+    }
+
+    // MOSS single-pass path: upload the copied file in one shot and skip
+    // decode/resample/VAD/chunking entirely (best diarization quality).
+    if provider.as_deref() == Some("moss") {
+        return run_moss_import(&app, meeting_folder, dest_path, dest_filename, title, language).await;
     }
 
     emit_progress(&app, "decoding", 15, "Decoding audio file...");
@@ -683,6 +696,182 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, mes
             message: message.to_string(),
         },
     );
+}
+
+/// MOSS single-pass import: upload the copied audio file to the MOSS server
+/// in one shot and parse the globally-consistent diarized result.
+/// On failure the partially-created meeting folder is removed.
+async fn run_moss_import<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_folder: PathBuf,
+    audio_path: PathBuf,
+    audio_filename: String,
+    title: String,
+    language: Option<String>,
+) -> Result<ImportResult> {
+    const MOSS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+    // Cleanup helper: every early error removes the partially-created folder
+    macro_rules! fail {
+        ($e:expr) => {{
+            let _ = std::fs::remove_dir_all(&meeting_folder);
+            return Err($e);
+        }};
+    }
+
+    info!(
+        "Starting MOSS import for '{}' (file: {})",
+        title,
+        audio_path.display()
+    );
+
+    // Probe duration via lightweight metadata read; drives the token budget
+    // and (for long recordings) chunked uploads.
+    let probed_duration = match extract_duration_from_metadata(&audio_path) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            warn!(
+                "Could not probe audio duration from metadata: {} (falling back to single-pass upload)",
+                e
+            );
+            None
+        }
+    };
+
+    // Load MOSS server configuration (falls back to the built-in default)
+    let config = match app.try_state::<AppState>() {
+        Some(state) => {
+            match SettingsRepository::get_moss_config_or_default(state.db_manager.pool()).await {
+                Ok(c) => c,
+                Err(e) => fail!(anyhow!("Failed to read MOSS configuration: {}", e)),
+            }
+        }
+        None => fail!(anyhow!("App state not available")),
+    };
+
+    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        fail!(anyhow!("Import cancelled"));
+    }
+
+    emit_progress(app, "uploading", 20, "Uploading audio to MOSS server...");
+
+    let client = MossClient::new(config.server_url, config.model, config.api_key);
+    let language_for_request = language.clone();
+
+    // Progress: slice uploads span 20%..80%
+    let app_for_progress = app.clone();
+    let moss_segments = match client
+        .transcribe_file_chunked(
+            &audio_path,
+            language_for_request.as_deref(),
+            config.hotwords.as_deref(),
+            probed_duration,
+            MOSS_REQUEST_TIMEOUT,
+            &|| IMPORT_CANCELLED.load(Ordering::SeqCst),
+            "Import cancelled",
+            &move |current, total| {
+                let pct = 20 + ((current as f32 / total as f32) * 60.0) as u32;
+                let msg = if total > 1 {
+                    format!(
+                        "MOSS is transcribing part {}/{} - long audio may take a while, please keep this window open...",
+                        current + 1,
+                        total
+                    )
+                } else {
+                    "MOSS is transcribing - long audio may take several minutes, please keep this window open...".to_string()
+                };
+                emit_progress(&app_for_progress, "server_processing", pct, &msg);
+            },
+        )
+        .await
+    {
+        Ok(segments) => segments,
+        Err(e) => {
+            if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+                fail!(anyhow!("Import cancelled"));
+            }
+            fail!(anyhow!("MOSS transcription failed: {}", e));
+        }
+    };
+
+    if moss_segments.is_empty() {
+        fail!(anyhow!("MOSS server returned an empty transcription"));
+    }
+
+    info!(
+        "MOSS returned {} diarized segments for import '{}'",
+        moss_segments.len(),
+        title
+    );
+
+    emit_progress(app, "saving", 85, "Creating meeting...");
+
+    // Inline speaker labels into text ("[S01] 文本")
+    let all_transcripts: Vec<(String, f64, f64)> = moss_segments
+        .iter()
+        .map(|s| {
+            let text = if s.speaker.is_empty() {
+                s.text.clone()
+            } else {
+                format!("[{}] {}", s.speaker, s.text)
+            };
+            (text, s.start * 1000.0, s.end * 1000.0)
+        })
+        .collect();
+
+    let duration_seconds = probed_duration.unwrap_or_else(|| {
+        moss_segments
+            .last()
+            .map(|s| s.end)
+            .unwrap_or(0.0)
+    });
+
+    let segments = create_transcript_segments(&all_transcripts);
+
+    // Save to database
+    let app_state = match app.try_state::<AppState>() {
+        Some(state) => state,
+        None => fail!(anyhow!("App state not available")),
+    };
+
+    let meeting_id = match create_meeting_with_transcripts(
+        app_state.db_manager.pool(),
+        &title,
+        &segments,
+        meeting_folder.to_string_lossy().to_string(),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => fail!(e),
+    };
+
+    // Write transcripts.json and metadata.json to the meeting folder
+    emit_progress(app, "saving", 90, "Writing transcript files...");
+
+    if let Err(e) = write_transcripts_json(&meeting_folder, &segments) {
+        warn!("Failed to write transcripts.json: {}", e);
+    }
+
+    if let Err(e) = write_import_metadata(
+        &meeting_folder,
+        &meeting_id,
+        &title,
+        duration_seconds,
+        &audio_filename,
+        "import",
+    ) {
+        warn!("Failed to write metadata.json: {}", e);
+    }
+
+    emit_progress(app, "complete", 100, "Import complete");
+
+    Ok(ImportResult {
+        meeting_id,
+        title,
+        segments_count: segments.len(),
+        duration_seconds,
+    })
 }
 
 

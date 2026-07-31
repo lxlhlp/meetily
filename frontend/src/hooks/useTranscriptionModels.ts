@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'moss';
   name: string;
   displayName: string;
   size_mb: number;
@@ -77,6 +77,27 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    // Fetch MOSS server models (remote OpenAI-compatible server, if configured)
+    try {
+      const mossConfig = await invoke<{ serverUrl: string; model: string; apiKey?: string | null } | null>('api_get_moss_config');
+      if (mossConfig?.serverUrl) {
+        const mossModels = await invoke<string[]>('api_test_moss_connection', {
+          serverUrl: mossConfig.serverUrl,
+          apiKey: mossConfig.apiKey ?? null,
+        });
+        mossModels.forEach((name) =>
+          allModels.push({
+            provider: 'moss' as const,
+            name,
+            displayName: `☁️ MOSS: ${name}`,
+            size_mb: 0,
+          })
+        );
+      }
+    } catch (err) {
+      console.error('Failed to fetch MOSS models (server unreachable or not configured):', err);
+    }
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -88,7 +109,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'moss' && m.provider === 'moss' && m.name === configuredModel)
     );
 
     // Only set default model if user hasn't manually selected one

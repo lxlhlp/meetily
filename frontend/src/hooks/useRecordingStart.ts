@@ -61,6 +61,29 @@ export function useRecordingStart(
     }
   }, []);
 
+  // Check readiness of the configured transcription engine.
+  // MOSS is a remote HTTP engine - no local model needed; server connectivity
+  // is validated by the Rust side when recording actually starts.
+  const checkTranscriptionReady = useCallback(async (): Promise<boolean> => {
+    try {
+      const config = await invoke<{ provider: string } | null>('api_get_transcript_config');
+      if (config?.provider === 'moss') {
+        const mossConfig = await invoke<{ serverUrl: string } | null>('api_get_moss_config');
+        if (!mossConfig?.serverUrl) {
+          toast.error('MOSS server not configured', {
+            description: 'Please set the MOSS Server URL in Settings → Transcription Models before recording.',
+            duration: 5000,
+          });
+          return false;
+        }
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to read transcript config, falling back to Parakeet check:', error);
+    }
+    return checkParakeetReady();
+  }, [checkParakeetReady]);
+
   // Check if any model is currently downloading
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
     try {
@@ -85,7 +108,7 @@ export function useRecordingStart(
       console.log('handleRecordingStart called - checking Parakeet model status');
 
       // Check if Parakeet transcription model is ready before starting
-      const parakeetReady = await checkParakeetReady();
+      const parakeetReady = await checkTranscriptionReady();
       if (!parakeetReady) {
         const isDownloading = await checkIfModelDownloading();
         if (isDownloading) {
@@ -141,7 +164,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkParakeetReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -154,7 +177,7 @@ export function useRecordingStart(
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
 
           // Check if Parakeet transcription model is ready before starting
-          const parakeetReady = await checkParakeetReady();
+          const parakeetReady = await checkTranscriptionReady();
           if (!parakeetReady) {
             const isDownloading = await checkIfModelDownloading();
             if (isDownloading) {
@@ -225,6 +248,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkParakeetReady,
+    checkTranscriptionReady,
     checkIfModelDownloading,
     showModal,
     setStatus,
@@ -242,7 +266,7 @@ export function useRecordingStart(
       setIsAutoStarting(true);
 
       // Check if Parakeet transcription model is ready before starting
-      const parakeetReady = await checkParakeetReady();
+      const parakeetReady = await checkTranscriptionReady();
       if (!parakeetReady) {
         const isDownloading = await checkIfModelDownloading();
         if (isDownloading) {
@@ -314,6 +338,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkParakeetReady,
+    checkTranscriptionReady,
     checkIfModelDownloading,
     showModal,
     setStatus,

@@ -4,7 +4,9 @@ use crate::audio::decoder::decode_audio_file;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
 use super::constants::AUDIO_EXTENSIONS;
+use super::transcription::MossClient;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::database::repositories::setting::SettingsRepository;
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -14,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Global flag to track if retranscription is in progress
@@ -102,10 +105,14 @@ pub async fn start_retranscription<R: Runtime>(
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_moss = provider.as_deref() == Some("moss");
     let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
 
-    // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    // Unload the engine after the batch job (success, failure, or cancellation).
+    // MOSS is a remote HTTP engine - nothing local was loaded, nothing to unload.
+    if !use_moss {
+        super::common::unload_engine_after_batch(use_parakeet).await;
+    }
 
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -179,6 +186,12 @@ async fn run_retranscription<R: Runtime>(
 ) -> Result<RetranscriptionResult> {
     let folder_path = PathBuf::from(&meeting_folder_path);
     let audio_path = find_audio_file(&folder_path)?;
+
+    // MOSS single-pass path: upload the raw recording in one shot and skip
+    // decode/resample/VAD/chunking entirely (best diarization quality).
+    if provider.as_deref() == Some("moss") {
+        return run_moss_retranscription(app, meeting_id, folder_path, audio_path, language).await;
+    }
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
@@ -421,49 +434,8 @@ async fn run_retranscription<R: Runtime>(
     // Create transcript segments with proper timestamps from VAD
     let segments = create_transcript_segments(&all_transcripts);
 
-    // Save to database
-    let app_state = app
-        .try_state::<AppState>()
-        .ok_or_else(|| anyhow!("App state not available"))?;
-
-    // Wrap delete+insert+update in a transaction to prevent data loss
-    let pool = app_state.db_manager.pool();
-    let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
-    let mut tx = sqlx::Connection::begin(&mut *conn)
-        .await
-        .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
-
-    sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
-        .bind(&meeting_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
-
-    for segment in &segments {
-        sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(&segment.id)
-        .bind(&meeting_id)
-        .bind(&segment.text)
-        .bind(&segment.timestamp)
-        .bind(segment.audio_start_time)
-        .bind(segment.audio_end_time)
-        .bind(segment.duration)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
-    }
-
-    tx.commit().await
-        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
-
-    info!(
-        "Updated {} transcripts for meeting {} in transaction",
-        segments.len(),
-        meeting_id
-    );
+    // Wrap delete+insert in a transaction to prevent data loss
+    persist_transcript_segments(&app, &meeting_id, &segments).await?;
 
     // Write updated transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, &meeting_id, "saving", 90, "Writing transcript files...");
@@ -498,9 +470,214 @@ async fn run_retranscription<R: Runtime>(
     })
 }
 
-/// Emit progress event
-fn emit_progress<R: Runtime>(
+/// Replace all transcripts of a meeting in a single transaction.
+/// On any failure the transaction is rolled back and existing data is kept.
+async fn persist_transcript_segments<R: Runtime>(
     app: &AppHandle<R>,
+    meeting_id: &str,
+    segments: &[crate::api::TranscriptSegment],
+) -> Result<()> {
+    let app_state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| anyhow!("App state not available"))?;
+
+    let pool = app_state.db_manager.pool();
+    let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
+    let mut tx = sqlx::Connection::begin(&mut *conn)
+        .await
+        .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
+
+    sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
+
+    for segment in segments {
+        sqlx::query(
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
+             VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&segment.id)
+        .bind(meeting_id)
+        .bind(&segment.text)
+        .bind(&segment.timestamp)
+        .bind(segment.audio_start_time)
+        .bind(segment.audio_end_time)
+        .bind(segment.duration)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
+    }
+
+    tx.commit().await
+        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+
+    info!(
+        "Updated {} transcripts for meeting {} in transaction",
+        segments.len(),
+        meeting_id
+    );
+
+    Ok(())
+}
+
+/// MOSS single-pass retranscription: upload the raw recording to the MOSS
+/// server in one shot and parse the globally-consistent diarized result.
+/// Skips decode/resample/VAD/chunking entirely.
+async fn run_moss_retranscription<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    folder_path: PathBuf,
+    audio_path: PathBuf,
+    language: Option<String>,
+) -> Result<RetranscriptionResult> {
+    /// Server-side inference for a 45-minute slice is estimated at a few
+    /// minutes on an RTX 4090; allow 30 minutes per request.
+    const MOSS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+    info!(
+        "Starting MOSS retranscription for meeting {} (file: {})",
+        meeting_id,
+        audio_path.display()
+    );
+
+    // Probe duration via lightweight metadata read; drives the token budget
+    // and (for long recordings) chunked uploads.
+    let probed_duration = match crate::audio::import::extract_duration_from_metadata(&audio_path) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            warn!(
+                "Could not probe audio duration from metadata: {} (falling back to single-pass upload)",
+                e
+            );
+            None
+        }
+    };
+
+    // Load MOSS server configuration (falls back to the built-in default)
+    let app_state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| anyhow!("App state not available"))?;
+    let config = SettingsRepository::get_moss_config_or_default(app_state.db_manager.pool())
+        .await
+        .map_err(|e| anyhow!("Failed to read MOSS configuration: {}", e))?;
+
+    if RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst) {
+        return Err(anyhow!("Retranscription cancelled"));
+    }
+
+    emit_progress(&app, &meeting_id, "uploading", 10, "Uploading audio to MOSS server...");
+
+    let client = MossClient::new(config.server_url, config.model, config.api_key);
+    let language_for_request = language.clone();
+
+    // Progress: slice uploads span 10%..75%
+    let app_for_progress = app.clone();
+    let meeting_id_for_progress = meeting_id.clone();
+    let moss_segments = client
+        .transcribe_file_chunked(
+            &audio_path,
+            language_for_request.as_deref(),
+            config.hotwords.as_deref(),
+            probed_duration,
+            MOSS_REQUEST_TIMEOUT,
+            &|| RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst),
+            "Retranscription cancelled",
+            &move |current, total| {
+                let pct = 10 + ((current as f32 / total as f32) * 65.0) as u32;
+                let msg = if total > 1 {
+                    format!(
+                        "MOSS is transcribing part {}/{} - long meetings may take a while, please keep this window open...",
+                        current + 1,
+                        total
+                    )
+                } else {
+                    "MOSS is transcribing - long meetings may take several minutes, please keep this window open...".to_string()
+                };
+                emit_progress(&app_for_progress, &meeting_id_for_progress, "server_processing", pct, &msg);
+            },
+        )
+        .await
+        .map_err(|e| {
+            if RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst) {
+                anyhow!("Retranscription cancelled")
+            } else {
+                anyhow!("MOSS transcription failed: {}", e)
+            }
+        })?;
+
+    if moss_segments.is_empty() {
+        return Err(anyhow!("MOSS server returned an empty transcription"));
+    }
+
+    info!(
+        "MOSS returned {} diarized segments for meeting {}",
+        moss_segments.len(),
+        meeting_id
+    );
+
+    emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
+
+    // Inline speaker labels into text ("[S01] 文本") - v1 keeps the DB schema
+    // unchanged; the summary LLM sees the labels and the UI needs no changes.
+    let all_transcripts: Vec<(String, f64, f64)> = moss_segments
+        .iter()
+        .map(|s| {
+            let text = if s.speaker.is_empty() {
+                s.text.clone()
+            } else {
+                format!("[{}] {}", s.speaker, s.text)
+            };
+            (text, s.start * 1000.0, s.end * 1000.0)
+        })
+        .collect();
+
+    let duration_seconds = probed_duration.unwrap_or_else(|| {
+        moss_segments
+            .last()
+            .map(|s| s.end)
+            .unwrap_or(0.0)
+    });
+
+    let segments = create_transcript_segments(&all_transcripts);
+
+    persist_transcript_segments(&app, &meeting_id, &segments).await?;
+
+    // Write updated transcripts.json and metadata.json to the meeting folder
+    emit_progress(&app, &meeting_id, "saving", 90, "Writing transcript files...");
+
+    if let Err(e) = write_transcripts_json(&folder_path, &segments) {
+        warn!("Failed to write transcripts.json: {}", e);
+    }
+
+    let audio_filename = audio_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("audio.mp4")
+        .to_string();
+
+    if let Err(e) = write_retranscription_metadata(
+        &folder_path,
+        &meeting_id,
+        duration_seconds,
+        &audio_filename,
+    ) {
+        warn!("Failed to update metadata.json: {}", e);
+    }
+
+    emit_progress(&app, &meeting_id, "complete", 100, "Retranscription complete");
+
+    Ok(RetranscriptionResult {
+        meeting_id,
+        segments_count: segments.len(),
+        duration_seconds,
+        language,
+    })
+}
+
+/// Emit progress event
+fn emit_progress<R: Runtime>(    app: &AppHandle<R>,
     meeting_id: &str,
     stage: &str,
     progress: u32,

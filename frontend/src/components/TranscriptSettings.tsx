@@ -10,7 +10,7 @@ import { ParakeetModelManager } from './ParakeetModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'moss';
     model: string;
     apiKey?: string | null;
 }
@@ -53,6 +53,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        moss: [], // Server URL + model handled by MossServerSettings component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -123,6 +124,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="moss">☁️ MOSS Server (Chinese meetings · Speaker labels)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +132,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'moss' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -168,6 +170,24 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
+                            />
+                        </div>
+                    )}
+
+                    {uiProvider === 'moss' && (
+                        <div className="mt-6">
+                            <MossServerSettings
+                                onSaved={(model) => {
+                                    setTranscriptModelConfig({
+                                        ...transcriptModelConfig,
+                                        provider: 'moss',
+                                        model,
+                                        apiKey: null,
+                                    });
+                                    if (onModelSelect) {
+                                        onModelSelect();
+                                    }
+                                }}
                             />
                         </div>
                     )}
@@ -223,6 +243,167 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             </div>
         </div >
     )
+}
+
+interface MossServerSettingsProps {
+    onSaved: (model: string) => void;
+}
+
+interface MossConfig {
+    serverUrl: string;
+    model: string;
+    apiKey?: string | null;
+    hotwords?: string | null;
+}
+
+const DEFAULT_MOSS_MODEL = 'moss-transcribe-diarize';
+
+/**
+ * Configuration form for a self-hosted MOSS-Transcribe-Diarize server.
+ * The config is shared by live (in-meeting) transcription and post-meeting
+ * retranscription.
+ */
+function MossServerSettings({ onSaved }: MossServerSettingsProps) {
+    const [serverUrl, setServerUrl] = useState('');
+    const [model, setModel] = useState(DEFAULT_MOSS_MODEL);
+    const [mossApiKey, setMossApiKey] = useState('');
+    const [hotwords, setHotwords] = useState('');
+    const [testing, setTesting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+
+    useEffect(() => {
+        invoke<MossConfig | null>('api_get_moss_config')
+            .then((cfg) => {
+                if (cfg) {
+                    setServerUrl(cfg.serverUrl || '');
+                    setModel(cfg.model || DEFAULT_MOSS_MODEL);
+                    setMossApiKey(cfg.apiKey || '');
+                    setHotwords(cfg.hotwords || '');
+                }
+            })
+            .catch((err) => console.error('Failed to load MOSS config:', err));
+    }, []);
+
+    const handleTestConnection = async () => {
+        setTesting(true);
+        setStatus(null);
+        try {
+            const models = await invoke<string[]>('api_test_moss_connection', {
+                serverUrl: serverUrl.trim(),
+                apiKey: mossApiKey.trim() || null,
+            });
+            setStatus({
+                ok: true,
+                message: models.length > 0
+                    ? `Connected. Available models: ${models.join(', ')}`
+                    : 'Connected, but the server returned no models.',
+            });
+        } catch (err) {
+            setStatus({ ok: false, message: String(err) });
+        } finally {
+            setTesting(false);
+        }
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        setStatus(null);
+        const trimmedModel = model.trim() || DEFAULT_MOSS_MODEL;
+        try {
+            await invoke('api_save_moss_config', {
+                serverUrl: serverUrl.trim(),
+                model: trimmedModel,
+                apiKey: mossApiKey.trim() || null,
+                hotwords: hotwords.trim() || null,
+            });
+            // Also persist provider/model selection so recording and
+            // retranscription pick up MOSS.
+            await invoke('api_save_transcript_config', {
+                provider: 'moss',
+                model: trimmedModel,
+                apiKey: null,
+            });
+            setStatus({ ok: true, message: 'MOSS configuration saved.' });
+            onSaved(trimmedModel);
+        } catch (err) {
+            setStatus({ ok: false, message: String(err) });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="space-y-3 mx-1">
+            <div>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">Server URL</Label>
+                <Input
+                    value={serverUrl}
+                    onChange={(e) => setServerUrl(e.target.value)}
+                    placeholder="http://192.168.1.10:8000"
+                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+            </div>
+            <div>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">Model</Label>
+                <Input
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder={DEFAULT_MOSS_MODEL}
+                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+            </div>
+            <div>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">API Key (optional)</Label>
+                <Input
+                    type="password"
+                    value={mossApiKey}
+                    onChange={(e) => setMossApiKey(e.target.value)}
+                    placeholder="Leave empty if the server requires no auth"
+                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+            </div>
+            <div>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">Hotwords (optional)</Label>
+                <Input
+                    value={hotwords}
+                    onChange={(e) => setHotwords(e.target.value)}
+                    placeholder="e.g. 达摩院,OpenMOSS,Meetily"
+                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+            </div>
+
+            <div className="flex items-center space-x-2 pt-1">
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTestConnection}
+                    disabled={testing || saving || !serverUrl.trim()}
+                >
+                    {testing ? 'Testing...' : 'Test Connection'}
+                </Button>
+                <Button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={testing || saving || !serverUrl.trim()}
+                >
+                    {saving ? 'Saving...' : 'Save & Use MOSS'}
+                </Button>
+            </div>
+
+            {status && (
+                <p className={`text-sm ${status.ok ? 'text-green-600' : 'text-red-600'}`}>
+                    {status.message}
+                </p>
+            )}
+
+            <p className="text-xs text-gray-500 pt-1">
+                Live mode transcribes per utterance with a short delay; speaker labels
+                ([S01], [S02]…) may drift between sentences. Run "Retranscribe" after
+                the meeting for globally consistent speaker labels.
+            </p>
+        </div>
+    );
 }
 
 

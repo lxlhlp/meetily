@@ -22,6 +22,36 @@ pub struct SaveTranscriptConfigRequest {
     pub api_key: Option<String>,
 }
 
+/// MOSS-Transcribe-Diarize server configuration, stored as JSON in the
+/// settings.mossTranscriptionConfig column. Shared by live transcription
+/// and post-meeting retranscription.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct MossTranscriptionConfig {
+    /// Base URL of the MOSS server, e.g. "http://192.168.1.10:8000"
+    #[serde(rename = "serverUrl")]
+    pub server_url: String,
+    /// Model name, e.g. "moss-transcribe-diarize"
+    pub model: String,
+    /// Optional bearer token
+    #[serde(rename = "apiKey")]
+    pub api_key: Option<String>,
+    /// Optional hotwords prompt injected into every request
+    pub hotwords: Option<String>,
+}
+
+impl MossTranscriptionConfig {
+    /// Built-in default pointing at the internal deployment, so packaged
+    /// builds work without manual configuration.
+    pub fn built_in_default() -> Self {
+        Self {
+            server_url: crate::config::DEFAULT_MOSS_SERVER_URL.to_string(),
+            model: crate::config::DEFAULT_MOSS_MODEL.to_string(),
+            api_key: None,
+            hotwords: None,
+        }
+    }
+}
+
 pub struct SettingsRepository;
 
 // Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
@@ -180,6 +210,7 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
+            "moss" => return Ok(()), // MOSS API key lives in mossTranscriptionConfig JSON
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -212,6 +243,7 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(None), // Parakeet doesn't need an API key
+            "moss" => return Ok(None), // MOSS API key lives in mossTranscriptionConfig JSON
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -339,6 +371,83 @@ impl SettingsRepository {
             "#,
         )
         .bind(&config.model)
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Gets the MOSS transcription server configuration from JSON
+    ///
+    /// # Returns
+    /// * `Ok(Some(MossTranscriptionConfig))` - Config exists and is valid JSON
+    /// * `Ok(None)` - No config stored
+    /// * `Err(sqlx::Error)` - Database error
+    pub async fn get_moss_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<MossTranscriptionConfig>, sqlx::Error> {
+        use sqlx::Row;
+
+        let row = sqlx::query(
+            r#"
+            SELECT mossTranscriptionConfig
+            FROM settings
+            WHERE id = '1'
+            LIMIT 1
+            "#
+        )
+        .fetch_optional(pool)
+        .await?;
+
+        match row {
+            Some(record) => {
+                let config_json: Option<String> = record.get("mossTranscriptionConfig");
+
+                if let Some(json) = config_json {
+                    let config: MossTranscriptionConfig = serde_json::from_str(&json)
+                        .map_err(|e| sqlx::Error::Protocol(
+                            format!("Invalid JSON in mossTranscriptionConfig: {}", e).into()
+                        ))?;
+
+                    Ok(Some(config))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Gets the MOSS config, falling back to the built-in default when the
+    /// user has never saved one (packaged builds work out of the box).
+    pub async fn get_moss_config_or_default(
+        pool: &SqlitePool,
+    ) -> std::result::Result<MossTranscriptionConfig, sqlx::Error> {
+        let config = Self::get_moss_config(pool).await?;
+        Ok(config
+            .filter(|c| !c.server_url.trim().is_empty())
+            .unwrap_or_else(MossTranscriptionConfig::built_in_default))
+    }
+
+    /// Saves the MOSS transcription server configuration as JSON
+    pub async fn save_moss_config(
+        pool: &SqlitePool,
+        config: &MossTranscriptionConfig,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| sqlx::Error::Protocol(
+                format!("Failed to serialize MOSS config to JSON: {}", e).into()
+            ))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, mossTranscriptionConfig)
+            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                mossTranscriptionConfig = excluded.mossTranscriptionConfig
+            "#,
+        )
         .bind(config_json)
         .execute(pool)
         .await?;

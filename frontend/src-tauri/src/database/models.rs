@@ -96,12 +96,25 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    /// MOSS-Transcribe-Diarize server configuration stored as JSON
+    #[sqlx(rename = "mossTranscriptionConfig")]
+    #[serde(rename = "mossTranscriptionConfig")]
+    pub moss_transcription_config: Option<String>,
 }
 
 impl Setting {
     /// Parse the custom OpenAI config from JSON string
     pub fn get_custom_openai_config(&self) -> Option<crate::summary::CustomOpenAIConfig> {
         self.custom_openai_config.as_ref().and_then(|json| {
+            serde_json::from_str(json).ok()
+        })
+    }
+
+    /// Parse the MOSS transcription config from JSON string
+    pub fn get_moss_config(
+        &self,
+    ) -> Option<crate::database::repositories::setting::MossTranscriptionConfig> {
+        self.moss_transcription_config.as_ref().and_then(|json| {
             serde_json::from_str(json).ok()
         })
     }

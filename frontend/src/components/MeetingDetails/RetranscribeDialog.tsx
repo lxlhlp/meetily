@@ -93,6 +93,7 @@ export function RetranscribeDialog({
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
+  const isMossModel = selectedModelDetails?.provider === 'moss';
 
   useEffect(() => {
     if (isParakeetModel && selectedLang !== 'auto') {
@@ -320,7 +321,9 @@ export function RetranscribeDialog({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Select a specific language to improve accuracy, or use auto-detect
+                  {isMossModel
+                    ? 'MOSS auto-detects Chinese and English; a manual selection is usually unnecessary'
+                    : 'Select a specific language to improve accuracy, or use auto-detect'}
                 </p>
               </div>
             ) : (
@@ -349,13 +352,15 @@ export function RetranscribeDialog({
                 <SelectContent>
                   {availableModels.map((model) => (
                     <SelectItem key={`${model.provider}:${model.name}`} value={`${model.provider}:${model.name}`}>
-                      {model.displayName} ({Math.round(model.size_mb)} MB)
+                      {model.displayName}{model.size_mb > 0 ? ` (${Math.round(model.size_mb)} MB)` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Choose a transcription model
+                {isMossModel
+                  ? 'MOSS transcribes the whole recording in one pass with globally consistent speaker labels'
+                  : 'Choose a transcription model'}
               </p>
             </div>
           )}
@@ -363,15 +368,27 @@ export function RetranscribeDialog({
           {isProcessing && progress && (
             <div className="space-y-2">
               <div className="relative">
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div
-                    className="bg-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(progress.progress_percentage, 100)}%` }}
-                  />
-                </div>
+                {progress.stage === 'server_processing' ? (
+                  /* Indeterminate state: MOSS server is working on the full
+                     recording and does not report incremental progress */
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div className="bg-blue-600 h-3 rounded-full w-1/3 animate-pulse" />
+                  </div>
+                ) : (
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div
+                      className="bg-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${Math.min(progress.progress_percentage, 100)}%` }}
+                    />
+                  </div>
+                )}
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
                   <span>{progress.stage}</span>
-                  <span>{Math.round(progress.progress_percentage)}%</span>
+                  <span>
+                    {progress.stage === 'server_processing'
+                      ? ''
+                      : `${Math.round(progress.progress_percentage)}%`}
+                  </span>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">

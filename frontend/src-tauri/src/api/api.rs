@@ -8,7 +8,8 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository,
+            setting::{MossTranscriptionConfig, SettingsRepository},
             transcript::TranscriptsRepository,
         },
     },
@@ -1252,12 +1253,13 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
     let pool = state.db_manager.pool();
 
     match SettingsRepository::get_custom_openai_config(pool).await {
+        // No saved config -> hand back the built-in default (internal Qwen
+        // deployment) so packaged builds show it pre-filled.
+        Ok(None) => Ok(Some(CustomOpenAIConfig::built_in_default())),
         Ok(config) => {
             if let Some(ref c) = config {
                 log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
                     c.endpoint, c.model);
-            } else {
-                log_info!("No custom OpenAI config found");
             }
             Ok(config)
         }
@@ -1266,6 +1268,109 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
             Err(format!("Failed to get custom OpenAI configuration: {}", e))
         }
     }
+}
+
+// ===== MOSS TRANSCRIPTION SERVER COMMANDS =====
+
+/// Default model name on the MOSS-Transcribe-Diarize server
+const DEFAULT_MOSS_MODEL: &str = "moss-transcribe-diarize";
+
+/// Saves the MOSS transcription server configuration (shared by live
+/// transcription and post-meeting retranscription)
+#[tauri::command]
+pub async fn api_save_moss_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    server_url: String,
+    model: String,
+    api_key: Option<String>,
+    hotwords: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_save_moss_config called: server_url='{}', model='{}'",
+        &server_url,
+        &model
+    );
+
+    if server_url.trim().is_empty() {
+        return Err("Server URL is required".to_string());
+    }
+    if !server_url.starts_with("http://") && !server_url.starts_with("https://") {
+        return Err("Server URL must start with http:// or https://".to_string());
+    }
+
+    let model = if model.trim().is_empty() {
+        DEFAULT_MOSS_MODEL.to_string()
+    } else {
+        model.trim().to_string()
+    };
+
+    let config = MossTranscriptionConfig {
+        server_url: server_url.trim().trim_end_matches('/').to_string(),
+        model,
+        api_key: api_key.filter(|k| !k.trim().is_empty()),
+        hotwords: hotwords.filter(|h| !h.trim().is_empty()),
+    };
+
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::save_moss_config(pool, &config).await {
+        Ok(()) => {
+            log_info!("✅ Successfully saved MOSS config for server: {}", config.server_url);
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "MOSS configuration saved successfully"
+            }))
+        }
+        Err(e) => {
+            log_error!("❌ Failed to save MOSS config: {}", e);
+            Err(format!("Failed to save MOSS configuration: {}", e))
+        }
+    }
+}
+
+/// Gets the MOSS transcription server configuration
+#[tauri::command]
+pub async fn api_get_moss_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<MossTranscriptionConfig>, String> {
+    log_info!("api_get_moss_config called");
+
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::get_moss_config(pool).await {
+        // No saved config -> hand back the built-in default so packaged
+        // builds show the internal server pre-filled.
+        Ok(None) => Ok(Some(
+            crate::database::repositories::setting::MossTranscriptionConfig::built_in_default(),
+        )),
+        Ok(config) => Ok(config),
+        Err(e) => {
+            log_error!("❌ Failed to get MOSS config: {}", e);
+            Err(format!("Failed to get MOSS configuration: {}", e))
+        }
+    }
+}
+
+/// Tests connectivity to a MOSS server, returning its model list
+#[tauri::command]
+pub async fn api_test_moss_connection<R: Runtime>(
+    _app: AppHandle<R>,
+    server_url: String,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    log_info!("api_test_moss_connection called: server_url='{}'", &server_url);
+
+    if server_url.trim().is_empty() {
+        return Err("Server URL is required".to_string());
+    }
+
+    let client = crate::audio::transcription::MossClient::new(server_url, String::new(), api_key);
+    client.test_connection().await.map_err(|e| {
+        log_error!("❌ MOSS connection test failed: {}", e);
+        e.to_string()
+    })
 }
 
 /// Tests the connection to a custom OpenAI-compatible endpoint

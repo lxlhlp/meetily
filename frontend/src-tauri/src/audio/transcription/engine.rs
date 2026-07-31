@@ -51,6 +51,18 @@ impl TranscriptionEngine {
 // MODEL VALIDATION AND INITIALIZATION
 // ============================================================================
 
+/// Load the saved MOSS server configuration (shared by live transcription
+/// and post-meeting retranscription), falling back to the built-in default.
+async fn load_moss_config<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<crate::database::repositories::setting::MossTranscriptionConfig, String> {
+    let state = app.state::<crate::state::AppState>();
+    let pool = state.db_manager.pool();
+    crate::database::repositories::setting::SettingsRepository::get_moss_config_or_default(pool)
+        .await
+        .map_err(|e| format!("Failed to read MOSS configuration: {}", e))
+}
+
 /// Validate that transcription models (Whisper or Parakeet) are ready before starting recording
 pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Check transcript configuration to determine which engine to validate
@@ -135,6 +147,28 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "moss" => {
+            info!("🔍 Validating MOSS server connection...");
+            let config = load_moss_config(app).await?;
+            let client = super::moss_client::MossClient::new(
+                config.server_url.clone(),
+                config.model.clone(),
+                config.api_key.clone(),
+            );
+            match client.test_connection().await {
+                Ok(models) => {
+                    info!("✅ MOSS server reachable, available models: {:?}", models);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ MOSS server validation failed: {}", e);
+                    Err(format!(
+                        "Cannot reach MOSS server: {}. Please check the Server URL in Settings → Transcription Models.",
+                        e
+                    ))
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -211,6 +245,18 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "moss" => {
+            info!("🌐 Initializing MOSS live transcription provider");
+            let config = load_moss_config(app).await?;
+            let client = super::moss_client::MossClient::new(
+                config.server_url,
+                config.model,
+                config.api_key,
+            );
+            Ok(TranscriptionEngine::Provider(Arc::new(
+                super::moss_provider::MossProvider::new(client, config.hotwords),
+            )))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

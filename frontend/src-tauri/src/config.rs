@@ -11,6 +11,18 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Built-in MOSS-Transcribe-Diarize server (internal deployment).
+/// Used as fallback when no MOSS config has been saved yet, so packaged
+/// builds work out of the box on the office network.
+pub const DEFAULT_MOSS_SERVER_URL: &str = "http://172.29.20.190:8000";
+pub const DEFAULT_MOSS_MODEL: &str = "moss-transcribe-diarize";
+
+/// Built-in summary LLM (Qwen3.6-27B on the same internal server), exposed
+/// through the Custom OpenAI provider as fallback defaults.
+pub const DEFAULT_CUSTOM_OPENAI_ENDPOINT: &str = "http://172.29.20.190:8085/v1";
+pub const DEFAULT_CUSTOM_OPENAI_API_KEY: &str = "zzzzz";
+pub const DEFAULT_CUSTOM_OPENAI_MODEL: &str = "unsloth/Qwen3.6-27B-NVFP4";
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///
