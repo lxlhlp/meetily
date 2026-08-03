@@ -69,8 +69,10 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [showOnboarding, setShowOnboarding] = useState(false)
-  const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  // Onboarding flow is disabled for this internal build (cloud providers
+  // are pre-configured). Kept as a constant so the flow can be re-enabled.
+  const [showOnboarding] = useState(false)
+  const [, setOnboardingCompleted] = useState(false)
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
@@ -78,25 +80,11 @@ export default function RootLayout({
   const [importFilePath, setImportFilePath] = useState<string | null>(null)
 
   useEffect(() => {
-    // Check onboarding status first
-    invoke<{ completed: boolean } | null>('get_onboarding_status')
-      .then((status) => {
-        const isComplete = status?.completed ?? false
-        setOnboardingCompleted(isComplete)
-
-        if (!isComplete) {
-          console.log('[Layout] Onboarding not completed, showing onboarding flow')
-          setShowOnboarding(true)
-        } else {
-          console.log('[Layout] Onboarding completed, showing main app')
-        }
-      })
-      .catch((error) => {
-        console.error('[Layout] Failed to check onboarding status:', error)
-        // Default to showing onboarding if we can't check
-        setShowOnboarding(true)
-        setOnboardingCompleted(false)
-      })
+    // Onboarding flow is disabled for this internal build: cloud providers
+    // (MOSS / Qwen) are pre-configured, so there is nothing to set up.
+    // Fresh databases are still initialized with cloud-first defaults via
+    // initialize_fresh_database (OnboardingContext).
+    setOnboardingCompleted(true)
   }, [])
 
   // Disable context menu in production
@@ -225,7 +213,6 @@ export default function RootLayout({
 
   const handleOnboardingComplete = () => {
     console.log('[Layout] Onboarding completed, reloading app')
-    setShowOnboarding(false)
     setOnboardingCompleted(true)
     // Optionally reload the window to ensure all state is fresh
     window.location.reload()
