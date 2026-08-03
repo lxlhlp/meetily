@@ -43,6 +43,27 @@ fn single_pass_limit_secs() -> f64 {
 /// Overridable via the MOSS_SLICE_SECS env var (mainly for testing).
 const DEFAULT_SLICE_SECS: f64 = 45.0 * 60.0;
 
+/// Full transcription instructions from the server's examples/prompts.md.
+/// The MOSS server treats `prompt` as the *entire* instruction - sending a
+/// bare hotword list would replace the diarization instruction and break the
+/// `[start][Sxx]text[end]` output format we parse. Hotwords must therefore
+/// be appended to the default instruction ("热词提示：..." / "Hotwords: ...").
+const DEFAULT_PROMPT_ZH: &str = "请将音频转写为文本，每一段需以起始时间戳和说话人编号（[S01]、[S02]、[S03]…）开头，正文为对应的语音内容，并在段末标注结束时间戳，以清晰标明该段语音范围。";
+const DEFAULT_PROMPT_EN: &str = "Transcribe the audio. For each segment, start with the timestamp and speaker ID ([S01], [S02], [S03], ...), then the spoken text, and end with the segment timestamp.";
+
+/// Wrap user hotwords into the full instruction prompt the server expects.
+/// Defaults to the Chinese instruction unless a non-Chinese language is set.
+fn build_full_prompt(hotwords: &str, language: Option<&str>) -> String {
+    let use_chinese = language
+        .map(|l| l.starts_with("zh") || l.starts_with("cmn"))
+        .unwrap_or(true);
+    if use_chinese {
+        format!("{}热词提示：{}", DEFAULT_PROMPT_ZH, hotwords.trim())
+    } else {
+        format!("{} Hotwords: {}", DEFAULT_PROMPT_EN, hotwords.trim())
+    }
+}
+
 fn slice_secs() -> f64 {
     std::env::var("MOSS_SLICE_SECS")
         .ok()
@@ -51,7 +72,24 @@ fn slice_secs() -> f64 {
         .unwrap_or(DEFAULT_SLICE_SECS)
 }
 
+/// Default overlap between adjacent slices (30 seconds). Hard cuts at slice
+/// boundaries land mid-sentence and garble words on both sides, so each
+/// slice is uploaded with this much extra audio on each end; segments whose
+/// midpoint falls in the overlap are attributed to exactly one slice.
+/// Overridable via the MOSS_SLICE_OVERLAP_SECS env var (mainly for testing).
+const DEFAULT_SLICE_OVERLAP_SECS: f64 = 30.0;
+
+fn slice_overlap_secs() -> f64 {
+    std::env::var("MOSS_SLICE_OVERLAP_SECS")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| *v >= 0.0)
+        .unwrap_or(DEFAULT_SLICE_OVERLAP_SECS)
+}
+
 /// Plan slices as (start_secs, duration_secs) pairs covering [0, total).
+/// These are the *ownership regions*: the actual upload windows are widened
+/// by [`slice_overlap_secs`] on both sides (clamped to [0, total)).
 fn compute_slices(total_secs: f64, slice_secs: f64) -> Vec<(f64, f64)> {
     let mut slices = Vec::new();
     let mut start = 0.0;
@@ -85,6 +123,16 @@ fn stitch_slice_segments(
             s
         })
         .collect()
+}
+
+/// Decide whether a segment (already offset to absolute time) belongs to the
+/// slice owning [region_start, region_end). Attribution uses the segment
+/// midpoint: speech duplicated in two slices' overlap zones is kept by
+/// exactly one of them, and a whole-file fallback segment (start=0, spanning
+/// the full upload) still lands inside its slice's region.
+fn segment_in_region(seg: &MossSegment, region_start: f64, region_end: f64) -> bool {
+    let mid = (seg.start + seg.end) / 2.0;
+    mid >= region_start && mid < region_end
 }
 
 /// Cut [start, start+dur) of `input` into a 16kHz mono PCM WAV at `output`.
@@ -214,10 +262,13 @@ impl MossClient {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "audio.wav".to_string());
 
-        // Token budget: ~800 per minute of audio, 65536 for 90 minutes.
+        // Token budget: ~1500 per minute of audio. The output carries
+        // per-line `[start][Sxx]...[end]` overhead (~10+ tokens each) on top
+        // of the text itself, and fast multi-speaker speech easily exceeds
+        // the old 800/min budget - truncation there silently drops sentences.
         let duration_secs = duration_secs.filter(|d| *d > 0.0);
         let max_new_tokens = match duration_secs {
-            Some(d) => (((d / 60.0).ceil() as u64) * 800).max(5120),
+            Some(d) => (((d / 60.0).ceil() as u64) * 1500).max(5120),
             None => 5120,
         };
 
@@ -230,9 +281,12 @@ impl MossClient {
 
     /// Transcribe a complete audio file, automatically splitting it into
     /// fixed-length slices when it exceeds the single-pass limit
-    /// ([`MOSS_SINGLE_PASS_LIMIT_SECS`]). Each slice is uploaded as a separate
-    /// request; timestamps are offset and speaker labels are prefixed per
-    /// slice ("P1-S01") because diarization is not consistent across slices.
+    /// ([`MOSS_SINGLE_PASS_LIMIT_SECS`]). Each slice is uploaded with
+    /// [`DEFAULT_SLICE_OVERLAP_SECS`] of extra audio on both sides so no word
+    /// is cut in half at a seam; timestamps are offset back to absolute time,
+    /// segments in the overlap are attributed to exactly one slice (by
+    /// midpoint), and speaker labels are prefixed per slice ("P1-S01")
+    /// because diarization is not consistent across slices.
     ///
     /// - `duration_secs`: probed duration; when `None` or within the limit,
     ///   falls back to a single-pass upload (no ffmpeg needed).
@@ -274,11 +328,13 @@ impl MossClient {
         let total_secs = duration_secs.expect("checked above");
         let plan = compute_slices(total_secs, slice_secs());
         let total_slices = plan.len();
+        let overlap = slice_overlap_secs();
         info!(
-            "🌐 MOSS chunked transcription: {:.0}s audio -> {} slices of <= {:.0}s",
+            "🌐 MOSS chunked transcription: {:.0}s audio -> {} slices of <= {:.0}s (+{:.0}s overlap)",
             total_secs,
             total_slices,
-            slice_secs()
+            slice_secs(),
+            overlap
         );
 
         // Temp dir holds the slices and is removed on drop (success or error)
@@ -291,11 +347,18 @@ impl MossClient {
             }
             on_slice_start(idx, total_slices);
 
+            // Widen the upload window by `overlap` on both sides so the model
+            // never has to transcribe a word cut in half at the seam; the
+            // region filter below drops the duplicated overlap speech.
+            let upload_start = (*start - overlap).max(0.0);
+            let upload_end = (*start + *dur + overlap).min(total_secs);
+            let upload_dur = upload_end - upload_start;
+
             let slice_path = temp_dir.path().join(format!("slice_{:03}.wav", idx));
-            slice_audio_with_ffmpeg(path, *start, *dur, &slice_path).await?;
+            slice_audio_with_ffmpeg(path, upload_start, upload_dur, &slice_path).await?;
 
             let request =
-                self.transcribe_file(&slice_path, language, prompt, Some(*dur), timeout);
+                self.transcribe_file(&slice_path, language, prompt, Some(upload_dur), timeout);
             tokio::pin!(request);
             let slice_segments = loop {
                 tokio::select! {
@@ -308,13 +371,20 @@ impl MossClient {
                 }
             };
 
+            let region_end = start + dur;
+            let kept: Vec<_> = stitch_slice_segments(slice_segments, idx, upload_start)
+                .into_iter()
+                .filter(|s| segment_in_region(s, *start, region_end))
+                .collect();
             info!(
-                "🌐 MOSS slice {}/{} done: {} segments",
+                "🌐 MOSS slice {}/{} done: {} segments kept (upload window {:.0}s..{:.0}s)",
                 idx + 1,
                 total_slices,
-                slice_segments.len()
+                kept.len(),
+                upload_start,
+                upload_end
             );
-            all_segments.extend(stitch_slice_segments(slice_segments, idx, *start));
+            all_segments.extend(kept);
         }
 
         Ok(all_segments)
@@ -334,8 +404,9 @@ impl MossClient {
         }
         let duration_secs = samples.len() as f64 / 16000.0;
         let wav = encode_wav_pcm16(samples);
-        // ~15 tokens per second of speech, floor of 64 for short utterances.
-        let max_new_tokens = ((duration_secs.ceil() as u64) * 15).max(64);
+        // ~30 tokens per second of speech (see transcribe_file for why the
+        // budget is generous), floor of 128 for short utterances.
+        let max_new_tokens = ((duration_secs.ceil() as u64) * 30).max(128);
 
         let text = self
             .post_transcription(
@@ -395,7 +466,7 @@ impl MossClient {
             form = form.text("language", lang.to_string());
         }
         if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
-            form = form.text("prompt", p.to_string());
+            form = form.text("prompt", build_full_prompt(p, language));
         }
 
         let mut req = self.client.post(&url).multipart(form).timeout(timeout);
@@ -624,6 +695,24 @@ mod tests {
     }
 
     #[test]
+    fn hotwords_are_wrapped_in_full_instruction() {
+        // Chinese by default / for zh language
+        let p = build_full_prompt("达摩院,OpenMOSS", None);
+        assert!(p.starts_with(DEFAULT_PROMPT_ZH));
+        assert!(p.ends_with("热词提示：达摩院,OpenMOSS"));
+        let p = build_full_prompt("达摩院", Some("zh"));
+        assert!(p.contains("热词提示：达摩院"));
+        // English instruction for non-Chinese languages
+        let p = build_full_prompt("OpenMOSS, Meetily", Some("en"));
+        assert!(p.starts_with(DEFAULT_PROMPT_EN));
+        assert!(p.ends_with("Hotwords: OpenMOSS, Meetily"));
+        // hotwords are trimmed
+        let p = build_full_prompt("  达摩院  ", Some("zh"));
+        assert!(p.ends_with("热词提示：达摩院"));
+        assert!(!p.contains("  达摩院"));
+    }
+
+    #[test]
     fn wav_header_is_valid() {
         let samples = vec![0.0f32, 0.5, -0.5, 1.0, -1.0];
         let wav = encode_wav_pcm16(&samples);
@@ -672,6 +761,24 @@ mod tests {
         // untagged segments stay untagged
         assert_eq!(stitched[1].speaker, "");
         assert_eq!(stitched[1].end, 2704.0);
+    }
+
+    #[test]
+    fn region_attribution_by_midpoint() {
+        // Region [10, 20): a segment fully inside belongs to it.
+        let inside = MossSegment { start: 12.0, end: 14.0, speaker: String::new(), text: String::new() };
+        assert!(segment_in_region(&inside, 10.0, 20.0));
+        // Overlap-zone duplicates: mid 9.5 -> previous slice, mid 20.5 -> next slice.
+        let before = MossSegment { start: 8.0, end: 11.0, speaker: String::new(), text: String::new() };
+        assert!(!segment_in_region(&before, 10.0, 20.0));
+        assert!(segment_in_region(&before, 0.0, 10.0));
+        let after = MossSegment { start: 19.0, end: 22.0, speaker: String::new(), text: String::new() };
+        assert!(!segment_in_region(&after, 10.0, 20.0));
+        assert!(segment_in_region(&after, 20.0, 30.0));
+        // Whole-upload fallback segment (start=0 after offset) still lands in
+        // its slice's region instead of being dropped.
+        let fallback = MossSegment { start: 10.0, end: 19.5, speaker: String::new(), text: String::new() };
+        assert!(segment_in_region(&fallback, 10.0, 20.0));
     }
 
     /// E2E against a real MOSS server. Run manually with:
