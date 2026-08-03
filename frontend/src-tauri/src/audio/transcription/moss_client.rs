@@ -504,15 +504,122 @@ impl MossClient {
 
 /// Parse MOSS diarized output into segments.
 ///
-/// Expected line format: `[0.87][S01]欢迎大家来体验...[5.21]`
+/// Two real-world formats are handled:
+///
+/// 1. Short audio / one utterance per line:
+///    `[0.87][S01]欢迎大家...[5.21]\n[5.50][S02]...`
+/// 2. Long audio / utterances concatenated on a single line:
+///    `[0.02][S01]然后走的...[5.64][6.35][S02]嗯，是。[7.35][8.14][S03]...`
+///
+/// The grammar is a token stream: every utterance starts with a
+/// `[start][Sxx]` marker; its text runs until the next marker, with a
+/// trailing `[end]` timestamp. Utterances without a speaker tag appear as
+/// bare `text[end]` runs between markers.
 ///
 /// Fault-tolerance rules:
-/// - Missing end timestamp -> filled with the next line's start; the last
-///   line falls back to `total_duration` (or its own start if unknown).
+/// - Missing end timestamp -> next utterance's start; the last one falls
+///   back to `total_duration` (or its own start if unknown).
 /// - Non-speaker bracket tags (e.g. `[laughter]`) are kept inline in text.
 /// - If nothing parses, the whole text is returned as one segment so no
 ///   content is lost.
 pub fn parse_moss_output(text: &str, total_duration: Option<f64>) -> Vec<MossSegment> {
+    // Utterance start marker: [12.34][S01]  (case-insensitive speaker tag)
+    let start_re = regex::Regex::new(r"\[\s*(\d+(?:\.\d+)?)\s*\]\s*\[(?i)(S\d+)\]")
+        .expect("start marker regex");
+    let ts_re = regex::Regex::new(r"\[\s*(\d+(?:\.\d+)?)\s*\]").expect("timestamp regex");
+
+    let markers: Vec<_> = start_re.find_iter(text).collect();
+
+    // No diarized markers at all -> legacy line-based parsing / fallback
+    if markers.is_empty() {
+        return parse_moss_legacy(text, total_duration);
+    }
+
+    let starts: Vec<f64> = markers
+        .iter()
+        .map(|m| {
+            start_re
+                .captures(m.as_str())
+                .and_then(|c| c[1].parse::<f64>().ok())
+                .unwrap_or(0.0)
+        })
+        .collect();
+
+    let mut segments: Vec<MossSegment> = Vec::new();
+
+    // Content before the first marker (rare): keep it instead of dropping
+    let head = text[..markers[0].start()].trim();
+    if !head.is_empty() {
+        segments.append(&mut parse_moss_legacy(head, Some(starts[0])));
+    }
+
+    for (i, m) in markers.iter().enumerate() {
+        let caps = start_re.captures(m.as_str()).expect("start marker captures");
+        let speaker = caps[2].to_uppercase();
+        let body_start = m.end();
+        let body_end = markers.get(i + 1).map(|n| n.start()).unwrap_or(text.len());
+        let body = &text[body_start..body_end];
+
+        // Split the body at timestamps: each `text[ts]` run is one utterance.
+        // The first run keeps this marker's speaker; later runs are
+        // speaker-less utterances the model didn't tag.
+        let mut pos = 0usize;
+        let mut cur_start = starts[i];
+        let mut cur_speaker = speaker.clone();
+        for tm in ts_re.find_iter(body) {
+            let seg_text = clean_moss_text(&body[pos..tm.start()]);
+            let ts: f64 = tm.as_str()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim()
+                .parse()
+                .unwrap_or(cur_start);
+            if !seg_text.is_empty() {
+                segments.push(MossSegment {
+                    start: cur_start,
+                    end: ts.max(cur_start),
+                    speaker: cur_speaker.clone(),
+                    text: seg_text,
+                });
+            }
+            cur_start = ts;
+            cur_speaker = String::new();
+            pos = tm.end();
+        }
+        // Trailing text without an end timestamp
+        let tail = clean_moss_text(&body[pos..]);
+        if !tail.is_empty() {
+            let end = starts
+                .get(i + 1)
+                .copied()
+                .or(total_duration)
+                .unwrap_or(cur_start);
+            segments.push(MossSegment {
+                start: cur_start,
+                end: end.max(cur_start),
+                speaker: cur_speaker,
+                text: tail,
+            });
+        }
+    }
+
+    segments
+}
+
+/// Join wrapped lines: CJK text is joined directly, other text with a space.
+fn clean_moss_text(raw: &str) -> String {
+    let joined = if raw.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+        raw.split('\n').map(|s| s.trim()).collect::<String>()
+    } else {
+        raw.lines().map(|s| s.trim()).collect::<Vec<_>>().join(" ")
+    };
+    joined.trim().to_string()
+}
+
+/// Legacy per-line parser for output without `[start][Sxx]` markers:
+/// `[0.87]text[5.21]` per line, `[laughter]` kept inline, and a final
+/// whole-text fallback so no content is ever dropped.
+fn parse_moss_legacy(text: &str, total_duration: Option<f64>) -> Vec<MossSegment> {
     let line_re = regex::Regex::new(
         r"^\s*\[\s*(\d+(?:\.\d+)?)\s*\]\s*(?:\[([^\]]+)\])?\s*(.*?)\s*(?:\[\s*(\d+(?:\.\d+)?)\s*\])?\s*$",
     )
@@ -692,6 +799,53 @@ mod tests {
     fn empty_input_yields_no_segments() {
         assert!(parse_moss_output("", Some(1.0)).is_empty());
         assert!(parse_moss_output("  \n  ", None).is_empty());
+    }
+
+    #[test]
+    fn parses_concatenated_long_audio_format() {
+        // Real output shape for long audio: utterances concatenated on ONE
+        // line, end timestamp of each utterance directly before the next
+        // [start][Sxx] marker.
+        let text = "[0.02][S01]然后走的是什么什么逻辑，所以说他没有录那个回款。[5.64][6.35][S02]嗯，是。[7.35][8.14][S03]所以我们。[8.68][8.52][S01]牛逼的要死，我一下子就觉得这个很厉害。[14.94]";
+        let segs = parse_moss_output(text, Some(20.0));
+        assert_eq!(segs.len(), 4);
+
+        assert_eq!(segs[0].start, 0.02);
+        assert_eq!(segs[0].end, 5.64);
+        assert_eq!(segs[0].speaker, "S01");
+        assert_eq!(segs[0].text, "然后走的是什么什么逻辑，所以说他没有录那个回款。");
+
+        assert_eq!(segs[1].start, 6.35);
+        assert_eq!(segs[1].end, 7.35);
+        assert_eq!(segs[1].speaker, "S02");
+        assert_eq!(segs[1].text, "嗯，是。");
+
+        assert_eq!(segs[2].speaker, "S03");
+        assert_eq!(segs[2].end, 8.68);
+
+        // last utterance: trailing [14.94] is its end timestamp
+        assert_eq!(segs[3].speaker, "S01");
+        assert_eq!(segs[3].start, 8.52);
+        assert_eq!(segs[3].end, 14.94);
+        assert!(!segs[3].text.contains('['), "raw markers leaked into text: {}", segs[3].text);
+    }
+
+    #[test]
+    fn concatenated_format_multiline_and_speakerless_tail() {
+        // Wrapped output (newlines inside an utterance) + a speaker-less
+        // utterance glued between two tagged ones.
+        let text = "[1.00][S01]第一句话\n还没说完。[4.50]中间这句没有标签。[7.00][7.50][S02]下一句。[9.00]";
+        let segs = parse_moss_output(text, Some(9.0));
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[0].speaker, "S01");
+        assert_eq!(segs[0].text, "第一句话还没说完。");
+        assert_eq!(segs[0].end, 4.50);
+        assert_eq!(segs[1].speaker, "");
+        assert_eq!(segs[1].start, 4.50);
+        assert_eq!(segs[1].end, 7.00);
+        assert_eq!(segs[2].speaker, "S02");
+        assert_eq!(segs[2].start, 7.50);
+        assert_eq!(segs[2].end, 9.00);
     }
 
     #[test]
