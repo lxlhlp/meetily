@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -74,6 +74,8 @@ export function useSummaryGeneration({
   onOpenModelSettings,
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
+  // Last custom prompt used for generation, reused on regenerate
+  const lastCustomPromptRef = useRef<string>('');
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
@@ -454,6 +456,9 @@ export function useSummaryGeneration({
 
   // Public API: Generate summary from transcripts
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+    // Remember the prompt so regeneration doesn't lose it
+    lastCustomPromptRef.current = customPrompt;
+
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
@@ -628,6 +633,10 @@ export function useSummaryGeneration({
 
     await processSummary({
       ...buildSummaryTranscriptPayload(allTranscripts),
+      customPrompt: lastCustomPromptRef.current
+        || (typeof window !== 'undefined'
+          ? localStorage.getItem(`meeting-custom-prompt:${meeting.id}`) || ''
+          : ''),
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);

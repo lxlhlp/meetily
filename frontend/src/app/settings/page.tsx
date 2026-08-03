@@ -11,20 +11,24 @@ import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useI18n, Locale } from '@/i18n';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 
 // Tabs configuration (constant)
 const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
+  { value: 'general', labelKey: 'settings.general', icon: Settings2 },
+  { value: 'recording', labelKey: 'settings.recordings', icon: Mic },
+  { value: 'Transcriptionmodels', labelKey: 'settings.transcription', icon: DatabaseIcon },
+  { value: 'summaryModels', labelKey: 'settings.summary', icon: SparkleIcon },
+  { value: 'beta', labelKey: 'settings.beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const { t, locale, setLocale } = useI18n();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
@@ -73,9 +77,23 @@ export default function SettingsPage() {
               className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
+              <span>{t('common.back')}</span>
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="text-3xl font-bold">{t('settings.title')}</h1>
+            <div className="ml-auto flex items-center gap-2">
+              <Label className="text-sm text-gray-600" title={t('settings.uiLanguageDesc')}>
+                {t('settings.uiLanguage')}
+              </Label>
+              <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
+                <SelectTrigger className="w-32 h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="zh-CN">中文</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
@@ -96,7 +114,7 @@ export default function SettingsPage() {
                     className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
                   >
                     <Icon className="w-4 h-4" />
-                    {tab.label}
+                    {t(tab.labelKey)}
                   </TabsTrigger>
                 );
               })}

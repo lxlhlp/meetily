@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { I18nProvider } from '@/i18n'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
@@ -234,6 +235,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
         <AnalyticsProvider>
+          <I18nProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
               <ConfigProvider>
@@ -274,6 +276,7 @@ export default function RootLayout({
               </ConfigProvider>
             </TranscriptProvider>
           </RecordingStateProvider>
+          </I18nProvider>
         </AnalyticsProvider>
 
         <Toaster position="bottom-center" richColors closeButton />

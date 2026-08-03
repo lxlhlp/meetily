@@ -20,6 +20,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useI18n } from '@/i18n';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import Analytics from '@/lib/analytics';
@@ -59,6 +60,7 @@ export function RetranscribeDialog({
   onComplete,
 }: RetranscribeDialogProps) {
   const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { t } = useI18n();
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -277,17 +279,17 @@ export function RetranscribeDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Retranscribing...
+                {t('meeting.retranscribing')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Retranscription Failed
+                {t('meeting.retranscribeFailed')}
               </>
             ) : (
               <>
                 <RefreshCw className="h-5 w-5 text-blue-600" />
-                Retranscribe Meeting
+                {t('meeting.retranscribeMeeting')}
               </>
             )}
           </DialogTitle>
@@ -306,11 +308,11 @@ export function RetranscribeDialog({
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Language</span>
+                  <span className="text-sm font-medium">{t('meeting.language')}</span>
                 </div>
                 <Select value={selectedLang} onValueChange={setSelectedLang}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select language" />
+                    <SelectValue placeholder={t('meeting.language')} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
                     {LANGUAGES.map((lang) => (
@@ -322,7 +324,7 @@ export function RetranscribeDialog({
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {isMossModel
-                    ? 'MOSS auto-detects Chinese and English; a manual selection is usually unnecessary'
+                    ? t('meeting.mossAutoDetect')
                     : 'Select a specific language to improve accuracy, or use auto-detect'}
                 </p>
               </div>
@@ -343,11 +345,11 @@ export function RetranscribeDialog({
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Model</span>
+                <span className="text-sm font-medium">{t('meeting.model')}</span>
               </div>
               <Select value={selectedModelKey} onValueChange={setSelectedModelKey} disabled={loadingModels}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder={loadingModels ? "Loading models..." : "Select model"} />
+                  <SelectValue placeholder={loadingModels ? t('common.loading') : t('meeting.model')} />
                 </SelectTrigger>
                 <SelectContent>
                   {availableModels.map((model) => (
@@ -359,7 +361,7 @@ export function RetranscribeDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 {isMossModel
-                  ? 'MOSS transcribes the whole recording in one pass with globally consistent speaker labels'
+                  ? t('meeting.mossOnePass')
                   : 'Choose a transcription model'}
               </p>
             </div>
@@ -408,7 +410,7 @@ export function RetranscribeDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={handleStartRetranscription}
@@ -416,20 +418,20 @@ export function RetranscribeDialog({
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                Start Retranscription
+                {t('meeting.startRetranscription')}
               </Button>
             </>
           )}
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              {t('common.cancel')}
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
+                {t('common.close')}
               </Button>
               <Button
                 onClick={() => {
@@ -438,7 +440,7 @@ export function RetranscribeDialog({
                 }}
                 variant="outline"
               >
-                Try Again
+                {t('common.retry')}
               </Button>
             </>
           )}

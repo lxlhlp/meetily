@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { useI18n } from '@/i18n';
 
 
 export interface TranscriptModelProps {
@@ -22,6 +23,7 @@ export interface TranscriptSettingsProps {
 }
 
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
+    const { t } = useI18n();
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
@@ -105,7 +107,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                 <div className="space-y-4 pb-6">
                     <div>
                         <Label className="block text-sm font-medium text-gray-700 mb-1">
-                            Transcript Model
+                            {t('settings.transcriptModel')}
                         </Label>
                         <div className="flex space-x-2 mx-1">
                             <Select
@@ -264,6 +266,7 @@ const DEFAULT_MOSS_MODEL = 'moss-transcribe-diarize';
  * retranscription.
  */
 function MossServerSettings({ onSaved }: MossServerSettingsProps) {
+    const { t } = useI18n();
     const [serverUrl, setServerUrl] = useState('');
     const [model, setModel] = useState(DEFAULT_MOSS_MODEL);
     const [mossApiKey, setMossApiKey] = useState('');
@@ -296,8 +299,8 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
             setStatus({
                 ok: true,
                 message: models.length > 0
-                    ? `Connected. Available models: ${models.join(', ')}`
-                    : 'Connected, but the server returned no models.',
+                    ? t('settings.connectedModels', { models: models.join(', ') })
+                    : t('settings.connectedModels', { models: '(none)' }),
             });
         } catch (err) {
             setStatus({ ok: false, message: String(err) });
@@ -324,7 +327,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                 model: trimmedModel,
                 apiKey: null,
             });
-            setStatus({ ok: true, message: 'MOSS configuration saved.' });
+            setStatus({ ok: true, message: t('settings.mossSaved') });
             onSaved(trimmedModel);
         } catch (err) {
             setStatus({ ok: false, message: String(err) });
@@ -336,7 +339,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
     return (
         <div className="space-y-3 mx-1">
             <div>
-                <Label className="block text-sm font-medium text-gray-700 mb-1">Server URL</Label>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.serverUrl')}</Label>
                 <Input
                     value={serverUrl}
                     onChange={(e) => setServerUrl(e.target.value)}
@@ -345,7 +348,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                 />
             </div>
             <div>
-                <Label className="block text-sm font-medium text-gray-700 mb-1">Model</Label>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.model')}</Label>
                 <Input
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
@@ -354,7 +357,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                 />
             </div>
             <div>
-                <Label className="block text-sm font-medium text-gray-700 mb-1">API Key (optional)</Label>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.apiKeyOptional')}</Label>
                 <Input
                     type="password"
                     value={mossApiKey}
@@ -364,11 +367,11 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                 />
             </div>
             <div>
-                <Label className="block text-sm font-medium text-gray-700 mb-1">Hotwords (optional)</Label>
+                <Label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.hotwordsOptional')}</Label>
                 <Input
                     value={hotwords}
                     onChange={(e) => setHotwords(e.target.value)}
-                    placeholder="e.g. 达摩院,OpenMOSS,Meetily"
+                    placeholder={t('settings.hotwordsPlaceholder')}
                     className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                 />
             </div>
@@ -380,14 +383,14 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                     onClick={handleTestConnection}
                     disabled={testing || saving || !serverUrl.trim()}
                 >
-                    {testing ? 'Testing...' : 'Test Connection'}
+                    {testing ? '...' : t('common.test')}
                 </Button>
                 <Button
                     type="button"
                     onClick={handleSave}
                     disabled={testing || saving || !serverUrl.trim()}
                 >
-                    {saving ? 'Saving...' : 'Save & Use MOSS'}
+                    {saving ? '...' : t('settings.saveAndUseMoss')}
                 </Button>
             </div>
 
@@ -398,9 +401,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
             )}
 
             <p className="text-xs text-gray-500 pt-1">
-                Live mode transcribes per utterance with a short delay; speaker labels
-                ([S01], [S02]…) may drift between sentences. Run "Retranscribe" after
-                the meeting for globally consistent speaker labels.
+                {t('settings.mossLiveHint')}
             </p>
         </div>
     );

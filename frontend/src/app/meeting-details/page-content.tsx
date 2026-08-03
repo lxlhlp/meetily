@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -54,7 +54,21 @@ export default function PageContent({
   });
 
   // State
-  const [customPrompt, setCustomPrompt] = useState<string>('');
+  // Custom prompt is persisted per meeting so it survives page reloads
+  const [customPrompt, setCustomPromptState] = useState<string>('');
+  const setCustomPrompt = useCallback((value: string) => {
+    setCustomPromptState(value);
+    try {
+      localStorage.setItem(`meeting-custom-prompt:${meeting.id}`, value);
+    } catch { /* storage unavailable */ }
+  }, [meeting.id]);
+
+  // Load persisted prompt when the meeting changes
+  useEffect(() => {
+    try {
+      setCustomPromptState(localStorage.getItem(`meeting-custom-prompt:${meeting.id}`) || '');
+    } catch { /* storage unavailable */ }
+  }, [meeting.id]);
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
 
@@ -138,6 +152,18 @@ export default function PageContent({
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
   }, []);
+
+  // Cmd/Ctrl+Enter: generate summary from anywhere on the page
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        summaryGeneration.handleGenerateSummary(customPrompt);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [customPrompt, summaryGeneration]);
 
   // Auto-generate summary when flag is set
   useEffect(() => {
