@@ -39,7 +39,9 @@ curl http://<IP>:8000/v1/audio/transcriptions \
 
 服务端要点：
 - 支持参数：`file`（multipart）、`model`、`response_format`（json/text，**vLLM 路径不支持 verbose_json**）、`language`、`temperature`、`max_new_tokens`（默认 5120，**长音频必须调大**，建议按 `ceil(分钟数 × 800)`，90 分钟给 65536）、`prompt`（热词注入）
-- 输出格式：`[起始秒][S01]文本。[结束秒]` 逐行，说话人标签 `[S01]`/`[S02]`… 全局一致
+- ⚠️ **参数名勘误（2026-08-03 实证）**：`max_new_tokens` 只在官方 **SGLang Omni** 后端有效；本部署用 **vLLM**，其转写协议的生成长度字段是 **`max_completion_tokens`**（`max_new_tokens` 会被 pydantic 静默丢弃，回退到 generation_config 的 5120 默认值 → 输出约 13 分钟即被截断）。客户端必须发送 `max_completion_tokens`
+- ⚠️ **单请求实际上限 16384 tokens ≈ 39 分钟（2026-08-03 实证）**：vLLM 与官方 transformers 路径均在精确 16384（2^14）处停止生成（`generated_tokens: 16384`，max_new_tokens=65536 无效）——**模型微调序列长度上限，与后端无关**。官方"90 分钟"指输入上下文（128k），密集会议语音输出 ~430 tok/min × 90min ≈ 39k tokens，超出生成视野，故长音频必须切片：客户端单遍上限 35 分钟、切片 30 分钟（输出 ~12.9k tokens，余量充足）
+- 输出格式：`[起始秒][S01]文本。[结束秒]` 逐行，说话人标签 `[S01]`/`[S02]`… 全局一致；**长音频实测为整段连发 token 流**（`[start][Sxx]text[end][start][Sxx]text[end]…` 无换行），解析器必须按 token 流处理
 - PyAV 解码，**可直接上传 mp4/m4a/wav/mp3 原始文件**，无需客户端转码
 - 上下文 131072 tokens（KV cache 133,680），支持官方宣称的 90 分钟单遍转写
 - 90 分钟音频在 4090 上预估推理 3~8 分钟，客户端超时应设 30 分钟

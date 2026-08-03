@@ -26,8 +26,12 @@ pub struct MossSegment {
     pub text: String,
 }
 
-/// MOSS officially supports ~90 minutes per single pass; slice longer audio.
-pub const MOSS_SINGLE_PASS_LIMIT_SECS: f64 = 85.0 * 60.0;
+/// MOSS officially supports ~90 minutes per single pass, but on our vLLM
+/// deployment the model reliably stops generating after ~39 minutes of
+/// transcript (verified 2026-08-03 with two independent 46-min samples:
+/// both ended at 39.1/39.4 min with ~21k chars despite a 69k token budget).
+/// Slice anything longer than this threshold.
+pub const MOSS_SINGLE_PASS_LIMIT_SECS: f64 = 35.0 * 60.0;
 
 /// Effective single-pass limit; overridable via MOSS_SINGLE_PASS_LIMIT_SECS
 /// env var (mainly for testing the chunked path with short audio).
@@ -39,9 +43,10 @@ fn single_pass_limit_secs() -> f64 {
         .unwrap_or(MOSS_SINGLE_PASS_LIMIT_SECS)
 }
 
-/// Default slice length for chunked uploads (45 minutes per request).
+/// Default slice length for chunked uploads (30 minutes per request) -
+/// comfortably below the observed ~39-minute generation ceiling.
 /// Overridable via the MOSS_SLICE_SECS env var (mainly for testing).
-const DEFAULT_SLICE_SECS: f64 = 45.0 * 60.0;
+const DEFAULT_SLICE_SECS: f64 = 30.0 * 60.0;
 
 /// Full transcription instructions from the server's examples/prompts.md.
 /// The MOSS server treats `prompt` as the *entire* instruction - sending a
@@ -461,7 +466,10 @@ impl MossClient {
             .part("file", part)
             .text("model", self.model.clone())
             .text("response_format", "json".to_string())
-            .text("max_new_tokens", max_new_tokens.to_string());
+            // vLLM's transcription endpoint reads the generation cap from
+            // `max_completion_tokens`; `max_new_tokens` is silently ignored
+            // and the server falls back to its 5120-token default.
+            .text("max_completion_tokens", max_new_tokens.to_string());
         if let Some(lang) = language.filter(|l| !l.is_empty() && *l != "auto") {
             form = form.text("language", lang.to_string());
         }
