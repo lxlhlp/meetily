@@ -30,9 +30,9 @@ on:
         type: boolean
         default: true
 
-# Cancel duplicate workflow runs
+# Cancel duplicate workflow runs (per target architecture)
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.target || 'aarch64-apple-darwin' }}
   cancel-in-progress: true
 
 env:
