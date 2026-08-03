@@ -178,29 +178,31 @@ pub async fn complete_onboarding<R: Runtime>(
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
+    // Onboarding defaults to the built-in Custom OpenAI (internal Qwen
+    // deployment) so no local summary model download is required.
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        &model,
+        "custom-openai",
+        crate::config::DEFAULT_CUSTOM_OPENAI_MODEL,
         "large-v3",
         None,
     ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
+        error!("Failed to save custom-openai model config: {}", e);
+        return Err(format!("Failed to save custom-openai model config: {}", e));
     }
-    info!("Saved builtin-ai model config: model={}", model);
+    info!("Saved custom-openai model config (built-in default)");
 
-    // Save transcription model config (parakeet provider) - always parakeet
+    // Save transcription model config - MOSS server (built-in config
+    // fallback supplies the endpoint), no local model download required.
     if let Err(e) = SettingsRepository::save_transcript_config(
         pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
+        "moss",
+        crate::config::DEFAULT_MOSS_MODEL,
     ).await {
         error!("Failed to save transcription model config: {}", e);
         return Err(format!("Failed to save transcription model config: {}", e));
     }
-    info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
+    info!("Saved transcription model config: provider=moss, model={}", crate::config::DEFAULT_MOSS_MODEL);
 
     // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)
     let mut status = load_onboarding_status(&app)

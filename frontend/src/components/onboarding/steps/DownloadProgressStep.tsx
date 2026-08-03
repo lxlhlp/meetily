@@ -37,6 +37,15 @@ export function DownloadProgressStep() {
 
   const [isMac, setIsMac] = useState(false);
 
+  // When the transcript provider is a cloud engine (MOSS), no local
+  // transcription model needs to be downloaded.
+  // null = config not loaded yet (downloads must not start yet)
+  const [useCloudTranscription, setUseCloudTranscription] = useState<boolean | null>(null);
+
+  // When the summary provider is a cloud engine (Custom OpenAI), no local
+  // summary model needs to be downloaded either.
+  const [useCloudSummary, setUseCloudSummary] = useState(false);
+
   const [parakeetState, setParakeetState] = useState<DownloadState>({
     status: parakeetDownloaded ? 'completed' : 'waiting',
     progress: parakeetDownloaded ? 100 : 0,
@@ -164,8 +173,30 @@ export function DownloadProgressStep() {
     checkPlatform();
   }, []);
 
-  // Start the required transcription model immediately; summary readiness must not block it.
+  // Detect cloud transcription provider (MOSS) - skips local model download
   useEffect(() => {
+    invoke<{ provider: string } | null>('api_get_transcript_config')
+      .then((config) => {
+        setUseCloudTranscription(config?.provider === 'moss');
+      })
+      .catch((e) => {
+        console.warn('[DownloadProgressStep] Failed to read transcript config:', e);
+        setUseCloudTranscription(false);
+      });
+    // Cloud summary provider (Custom OpenAI) also skips local model download
+    invoke<{ provider: string } | null>('api_get_model_config')
+      .then((config) => {
+        if (config?.provider === 'custom-openai') {
+          setUseCloudSummary(true);
+        }
+      })
+      .catch((e) => console.warn('[DownloadProgressStep] Failed to read model config:', e));
+  }, []);
+
+  // Start the required transcription model immediately; summary readiness must not block it.
+  // Cloud providers (MOSS) need no local model - skip the download entirely.
+  useEffect(() => {
+    if (useCloudTranscription !== false) return; // wait for config; skip when cloud
     if (parakeetDownloadStartedRef.current) return;
     parakeetDownloadStartedRef.current = true;
 
@@ -186,12 +217,13 @@ export function DownloadProgressStep() {
 
   // Start the selected summary model only after the backend recommendation is known.
   useEffect(() => {
+    if (useCloudSummary) return; // cloud summary needs no local model
     if (summaryDownloadStartedRef.current) return;
     if (!selectedSummaryModel) return;
     summaryDownloadStartedRef.current = true;
 
     startSummaryDownload();
-  }, [selectedSummaryModel]);
+  }, [selectedSummaryModel, useCloudSummary]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -329,27 +361,30 @@ export function DownloadProgressStep() {
   };
 
   const handleContinue = async () => {
-    // Verify actual model availability (catches state drift)
-    try {
-      await invoke('parakeet_init');
-      const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
+    // Cloud transcription (MOSS) needs no local model - skip verification
+    if (!useCloudTranscription) {
+      // Verify actual model availability (catches state drift)
+      try {
+        await invoke('parakeet_init');
+        const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
 
-      if (actuallyAvailable && !parakeetDownloaded) {
-        console.log('[DownloadProgressStep] Model available but state not updated');
-        setParakeetDownloaded(true);
-        setParakeetState((prev) => ({
-          ...prev,
-          status: 'completed',
-          progress: 100,
-        }));
-      } else if (!actuallyAvailable && parakeetState.status === 'error') {
-        toast.error('Transcription engine required', {
-          description: 'Please retry the download before continuing.',
-        });
-        return;
+        if (actuallyAvailable && !parakeetDownloaded) {
+          console.log('[DownloadProgressStep] Model available but state not updated');
+          setParakeetDownloaded(true);
+          setParakeetState((prev) => ({
+            ...prev,
+            status: 'completed',
+            progress: 100,
+          }));
+        } else if (!actuallyAvailable && parakeetState.status === 'error') {
+          toast.error('Transcription engine required', {
+            description: 'Please retry the download before continuing.',
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('[DownloadProgressStep] Failed to verify model:', error);
       }
-    } catch (error) {
-      console.warn('[DownloadProgressStep] Failed to verify model:', error);
     }
 
     // Check if downloads are complete for toast notification
@@ -481,19 +516,53 @@ export function DownloadProgressStep() {
       <div className="flex flex-col items-center space-y-6">
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
-          {renderDownloadCard(
-            'Transcription Engine',
-            <Mic className="w-5 h-5 text-gray-600" />,
-            parakeetState,
-            '~670 MB'
+          {useCloudTranscription && !parakeetDownloaded ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+                    <Mic className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-gray-900">Transcription Engine</h3>
+                    <p className="text-sm text-gray-500">云端 MOSS 服务（内网已配置）</p>
+                  </div>
+                </div>
+                <span className="text-sm text-blue-600 font-medium">无需下载</span>
+              </div>
+            </div>
+          ) : (
+            renderDownloadCard(
+              'Transcription Engine',
+              <Mic className="w-5 h-5 text-gray-600" />,
+              parakeetState,
+              '~670 MB'
+            )
           )}
 
-          {renderDownloadCard(
-            'Summary Engine',
-            <Sparkles className="w-5 h-5 text-gray-600" />,
-            summaryState,
-            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
-            'MiB'
+          {useCloudSummary && !summaryModelDownloaded ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+                    <Sparkles className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-gray-900">Summary Engine</h3>
+                    <p className="text-sm text-gray-500">云端 Qwen3.6-27B（内网已配置）</p>
+                  </div>
+                </div>
+                <span className="text-sm text-blue-600 font-medium">无需下载</span>
+              </div>
+            </div>
+          ) : (
+            renderDownloadCard(
+              'Summary Engine',
+              <Sparkles className="w-5 h-5 text-gray-600" />,
+              summaryState,
+              getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
+              'MiB'
+            )
           )}
         </div>
 
@@ -524,15 +593,20 @@ export function DownloadProgressStep() {
         <div className="w-full max-w-xs">
           <Button
             onClick={handleContinue}
-            disabled={!parakeetDownloaded || isCompleting}
+            disabled={(!parakeetDownloaded && !useCloudTranscription) || isCompleting}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {(isCompleting || !parakeetDownloaded) ? (
+            {(isCompleting || (!parakeetDownloaded && !useCloudTranscription)) ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               'Continue'
             )}
           </Button>
+          {useCloudTranscription && !parakeetDownloaded && (
+            <p className="text-xs text-gray-500 text-center mt-2">
+              已配置云端 MOSS 转写，无需下载本地模型；稍后在设置中也可随时下载离线引擎
+            </p>
+          )}
         </div>
       </div>
     </OnboardingContainer>

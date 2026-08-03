@@ -478,13 +478,25 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setSelectedSummaryModel(modelToSave);
       }
 
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToSave,
-        refresh: true,
-      });
-      setSummaryModelDownloaded(selectedModelReady);
-      if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
+      // Cloud summary provider (Custom OpenAI) needs no local model -
+      // skip the builtin-ai readiness check and background download.
+      let skipLocalSummaryModel = false;
+      try {
+        const modelConfig = await invoke<{ provider: string } | null>('api_get_model_config');
+        skipLocalSummaryModel = modelConfig?.provider === 'custom-openai';
+      } catch { /* fall through to builtin-ai check */ }
+
+      if (!skipLocalSummaryModel) {
+        const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
+          modelName: modelToSave,
+          refresh: true,
+        });
+        setSummaryModelDownloaded(selectedModelReady);
+        if (!selectedModelReady) {
+          requestSummaryModelDownload(modelToSave);
+        }
+      } else {
+        setSummaryModelDownloaded(true);
       }
 
       // Onboarding always uses builtin-ai with selected model
