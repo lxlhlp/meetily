@@ -1486,3 +1486,105 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         }
     }
 }
+
+/// A speaker profile as returned to the UI.
+#[derive(serde::Serialize)]
+pub struct SpeakerInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "sampleAudioPath")]
+    pub sample_audio_path: String,
+    #[serde(rename = "sampleText")]
+    pub sample_text: Option<String>,
+    #[serde(rename = "meetingCount")]
+    pub meeting_count: i64,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+async fn speaker_to_info(
+    pool: &sqlx::SqlitePool,
+    sp: crate::database::repositories::speaker::Speaker,
+) -> Result<SpeakerInfo, String> {
+    let count = crate::database::repositories::speaker::SpeakerRepository::meeting_count(pool, &sp.id)
+        .await
+        .map_err(|e| format!("Failed to count meetings for speaker: {}", e))?;
+    Ok(SpeakerInfo {
+        id: sp.id,
+        name: sp.name,
+        sample_audio_path: sp.sample_audio_path,
+        sample_text: sp.sample_text,
+        meeting_count: count,
+        created_at: sp.created_at,
+    })
+}
+
+/// List all speaker profiles (voiceprint library).
+#[tauri::command]
+pub async fn api_speaker_list<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SpeakerInfo>, String> {
+    let pool = state.db_manager.pool();
+    let speakers = crate::database::repositories::speaker::SpeakerRepository::list(pool)
+        .await
+        .map_err(|e| format!("Failed to list speakers: {}", e))?;
+    let mut out = Vec::new();
+    for sp in speakers {
+        out.push(speaker_to_info(pool, sp).await?);
+    }
+    Ok(out)
+}
+
+/// Rename a speaker profile (audition the sample, then edit the name).
+#[tauri::command]
+pub async fn api_speaker_update_name<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Name is required".to_string());
+    }
+    let pool = state.db_manager.pool();
+    crate::database::repositories::speaker::SpeakerRepository::update_name(pool, &id, &name)
+        .await
+        .map_err(|e| format!("Failed to update speaker name: {}", e))
+}
+
+/// Merge two profiles: repoint all meeting mappings to `to_id` and delete
+/// `from_id`.
+#[tauri::command]
+pub async fn api_speaker_merge<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    from_id: String,
+    to_id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    crate::database::repositories::speaker::SpeakerRepository::merge(pool, &from_id, &to_id)
+        .await
+        .map_err(|e| format!("Failed to merge speakers: {}", e))
+}
+
+/// Delete a speaker profile and its sample audio files.
+#[tauri::command]
+pub async fn api_speaker_delete<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    // Remove only this profile's sample audio file (not the shared
+    // speaker_samples/ directory, which holds every profile's samples).
+    if let Ok(Some(sp)) = crate::database::repositories::speaker::SpeakerRepository::get(pool, &id).await {
+        if !sp.sample_audio_path.is_empty() {
+            let _ = std::fs::remove_file(&sp.sample_audio_path);
+        }
+    }
+    crate::database::repositories::speaker::SpeakerRepository::delete(pool, &id)
+        .await
+        .map_err(|e| format!("Failed to delete speaker: {}", e))
+}

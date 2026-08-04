@@ -652,6 +652,7 @@ async fn run_import<R: Runtime>(
 
     let meeting_id = create_meeting_with_transcripts(
         app_state.db_manager.pool(),
+        &format!("meeting-{}", Uuid::new_v4()),
         &title,
         &segments,
         meeting_folder.to_string_lossy().to_string(),
@@ -798,16 +799,63 @@ async fn run_moss_import<R: Runtime>(
         fail!(anyhow!("MOSS server returned an empty transcription"));
     }
 
+    // Save to database
+    let app_state = match app.try_state::<AppState>() {
+        Some(state) => state,
+        None => fail!(anyhow!("App state not available")),
+    };
+
+    // The meeting id is generated up front (before alignment) so speaker
+    // profile creation can record first-seen meeting and label mappings.
+    let meeting_id = format!("meeting-{}", Uuid::new_v4());
+
+    emit_progress(app, "saving", 82, "Aligning speakers...");
+
+    // Align MOSS speaker labels to the global voiceprint library. This is
+    // best-effort: on any failure the raw labels (P1-S01 etc.) pass through.
+    let app_data_dir = app.path().app_data_dir().ok();
+    let aligned_segments = if let Some(data_dir) = app_data_dir {
+        let aligner = crate::audio::transcription::speaker_alignment::SpeakerAligner::new(
+            Box::new(
+                crate::audio::transcription::speaker_alignment::HttpEmbedder::new(
+                    std::env::var("MOSS_EMBEDDING_URL").unwrap_or_else(|_| {
+                        crate::audio::transcription::speaker_alignment::DEFAULT_EMBEDDING_URL
+                            .to_string()
+                    }),
+                ),
+            ),
+            data_dir.join("speaker_samples"),
+            app_state.db_manager.pool().clone(),
+            meeting_id.clone(),
+            audio_path.clone(),
+        );
+        aligner.align(moss_segments).await
+    } else {
+        // No app data dir - fall back to raw segments.
+        moss_segments
+            .into_iter()
+            .map(|s| {
+                crate::audio::transcription::speaker_alignment::AlignedSegment {
+                    start: s.start,
+                    end: s.end,
+                    speaker: s.speaker,
+                    speaker_id: None,
+                    text: s.text,
+                }
+            })
+            .collect()
+    };
+
     info!(
         "MOSS returned {} diarized segments for import '{}'",
-        moss_segments.len(),
+        aligned_segments.len(),
         title
     );
 
     emit_progress(app, "saving", 85, "Creating meeting...");
 
-    // Inline speaker labels into text ("[S01] 文本")
-    let all_transcripts: Vec<(String, f64, f64)> = moss_segments
+    // Inline speaker names into text ("[张三] 文本")
+    let all_transcripts: Vec<(String, f64, f64)> = aligned_segments
         .iter()
         .map(|s| {
             let text = if s.speaker.is_empty() {
@@ -820,7 +868,7 @@ async fn run_moss_import<R: Runtime>(
         .collect();
 
     let duration_seconds = probed_duration.unwrap_or_else(|| {
-        moss_segments
+        aligned_segments
             .last()
             .map(|s| s.end)
             .unwrap_or(0.0)
@@ -828,14 +876,9 @@ async fn run_moss_import<R: Runtime>(
 
     let segments = create_transcript_segments(&all_transcripts);
 
-    // Save to database
-    let app_state = match app.try_state::<AppState>() {
-        Some(state) => state,
-        None => fail!(anyhow!("App state not available")),
-    };
-
     let meeting_id = match create_meeting_with_transcripts(
         app_state.db_manager.pool(),
+        &meeting_id,
         &title,
         &segments,
         meeting_folder.to_string_lossy().to_string(),
@@ -878,11 +921,11 @@ async fn run_moss_import<R: Runtime>(
 /// Create a new meeting with transcripts in the database
 async fn create_meeting_with_transcripts(
     pool: &sqlx::SqlitePool,
+    meeting_id: &str,
     title: &str,
     segments: &[TranscriptSegment],
     folder_path: String,
 ) -> Result<String> {
-    let meeting_id = format!("meeting-{}", Uuid::new_v4());
     let now = chrono::Utc::now();
 
     // Start transaction
@@ -933,7 +976,7 @@ async fn create_meeting_with_transcripts(
         segments.len()
     );
 
-    Ok(meeting_id)
+    Ok(meeting_id.to_string())
 }
 
 /// Get or initialize the Whisper engine

@@ -7,6 +7,7 @@ pub mod whisper_provider;
 pub mod parakeet_provider;
 pub mod moss_client;
 pub mod moss_provider;
+pub mod speaker_alignment;
 pub mod engine;
 pub mod worker;
 

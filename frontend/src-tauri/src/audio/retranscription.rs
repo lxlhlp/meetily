@@ -563,6 +563,18 @@ async fn run_moss_retranscription<R: Runtime>(
         .await
         .map_err(|e| anyhow!("Failed to read MOSS configuration: {}", e))?;
 
+    // Clear stale speaker mappings from any previous retranscription of this
+    // meeting so they don't accumulate on repeated runs. Speaker profiles
+    // themselves are kept (they may be referenced by other meetings).
+    if let Err(e) = crate::database::repositories::speaker::SpeakerRepository::clear_meeting_mappings(
+        app_state.db_manager.pool(),
+        &meeting_id,
+    )
+    .await
+    {
+        warn!("Failed to clear stale speaker mappings: {}", e);
+    }
+
     if RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst) {
         return Err(anyhow!("Retranscription cancelled"));
     }
@@ -611,17 +623,55 @@ async fn run_moss_retranscription<R: Runtime>(
         return Err(anyhow!("MOSS server returned an empty transcription"));
     }
 
+    emit_progress(&app, &meeting_id, "saving", 78, "Aligning speakers...");
+
+    // Align MOSS speaker labels to the global voiceprint library so the
+    // same person keeps one name across slices and across meetings. This is
+    // best-effort: on any failure the raw labels (P1-S01 etc.) pass through.
+    let app_data_dir = app.path().app_data_dir().ok();
+    let aligned_segments = if let Some(data_dir) = app_data_dir {
+        let aligner = crate::audio::transcription::speaker_alignment::SpeakerAligner::new(
+            Box::new(
+                crate::audio::transcription::speaker_alignment::HttpEmbedder::new(
+                    std::env::var("MOSS_EMBEDDING_URL").unwrap_or_else(|_| {
+                        crate::audio::transcription::speaker_alignment::DEFAULT_EMBEDDING_URL
+                            .to_string()
+                    }),
+                ),
+            ),
+            data_dir.join("speaker_samples"),
+            app_state.db_manager.pool().clone(),
+            meeting_id.clone(),
+            audio_path.clone(),
+        );
+        aligner.align(moss_segments).await
+    } else {
+        // No app data dir - fall back to raw segments.
+        moss_segments
+            .into_iter()
+            .map(|s| {
+                crate::audio::transcription::speaker_alignment::AlignedSegment {
+                    start: s.start,
+                    end: s.end,
+                    speaker: s.speaker,
+                    speaker_id: None,
+                    text: s.text,
+                }
+            })
+            .collect()
+    };
+
     info!(
         "MOSS returned {} diarized segments for meeting {}",
-        moss_segments.len(),
+        aligned_segments.len(),
         meeting_id
     );
 
     emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
 
-    // Inline speaker labels into text ("[S01] 文本") - v1 keeps the DB schema
-    // unchanged; the summary LLM sees the labels and the UI needs no changes.
-    let all_transcripts: Vec<(String, f64, f64)> = moss_segments
+    // Inline speaker names into text ("[张三] 文本") - v1 keeps the DB schema
+    // unchanged; the summary LLM sees real names and the UI needs no changes.
+    let all_transcripts: Vec<(String, f64, f64)> = aligned_segments
         .iter()
         .map(|s| {
             let text = if s.speaker.is_empty() {
@@ -634,7 +684,7 @@ async fn run_moss_retranscription<R: Runtime>(
         .collect();
 
     let duration_seconds = probed_duration.unwrap_or_else(|| {
-        moss_segments
+        aligned_segments
             .last()
             .map(|s| s.end)
             .unwrap_or(0.0)
