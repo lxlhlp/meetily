@@ -143,7 +143,7 @@ fn segment_in_region(seg: &MossSegment, region_start: f64, region_end: f64) -> b
 /// Cut [start, start+dur) of `input` into a 16kHz mono PCM WAV at `output`.
 /// MOSS resamples server-side anyway, so a compact WAV keeps uploads small
 /// and decodable regardless of the source container/codec.
-async fn slice_audio_with_ffmpeg(input: &Path, start: f64, dur: f64, output: &Path) -> Result<()> {
+pub(crate) async fn slice_audio_with_ffmpeg(input: &Path, start: f64, dur: f64, output: &Path) -> Result<()> {
     let ffmpeg = std::env::var("MOSS_FFMPEG_PATH")
         .ok()
         .filter(|p| !p.is_empty())
@@ -235,7 +235,10 @@ pub struct MossClient {
 impl MossClient {
     pub fn new(server_url: String, model: String, api_key: Option<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             server_url: server_url.trim_end_matches('/').to_string(),
             model,
             api_key: api_key.filter(|k| !k.trim().is_empty()),
@@ -483,7 +486,7 @@ impl MossClient {
         }
 
         info!(
-            "🌐 MOSS transcription request: model={}, max_new_tokens={}, timeout={}s",
+            "🌐 MOSS transcription request: model={}, max_completion_tokens={}, timeout={}s",
             self.model,
             max_new_tokens,
             timeout.as_secs()
@@ -718,7 +721,7 @@ fn parse_moss_legacy(text: &str, total_duration: Option<f64>) -> Vec<MossSegment
 }
 
 /// Encode 16kHz mono f32 samples as a PCM16 WAV byte stream (44-byte header).
-fn encode_wav_pcm16(samples: &[f32]) -> Vec<u8> {
+pub(crate) fn encode_wav_pcm16(samples: &[f32]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
     out.extend_from_slice(b"RIFF");
