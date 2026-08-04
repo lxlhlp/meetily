@@ -107,6 +107,28 @@ export function useRecordingStart(
     try {
       console.log('handleRecordingStart called - checking Parakeet model status');
 
+      // Trigger microphone permission request before recording (macOS only).
+      // This used to happen in the onboarding flow (PermissionsStep), which
+      // we removed; without it the system never prompts and CPAL receives
+      // silence. On macOS the first call shows the system permission dialog.
+      // On other platforms the command returns immediately and is a no-op.
+      try {
+        const granted = await invoke<boolean>('trigger_microphone_permission');
+        if (!granted) {
+          toast.error('Microphone permission required', {
+            description: 'Please grant microphone access in System Settings → Privacy & Security, then restart the app.',
+            duration: 6000,
+          });
+          setStatus(RecordingStatus.IDLE);
+          return;
+        }
+      } catch (err) {
+        // Non-fatal: on platforms where trigger_microphone_permission is not
+        // applicable or already granted, this may still throw - recording
+        // should proceed.
+        console.warn('trigger_microphone_permission failed (non-fatal on some platforms):', err);
+      }
+
       // Check if Parakeet transcription model is ready before starting
       const parakeetReady = await checkTranscriptionReady();
       if (!parakeetReady) {

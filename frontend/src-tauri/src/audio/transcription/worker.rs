@@ -556,15 +556,9 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         e
                     );
 
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": e.to_string(),
-                            "userMessage": format!("Transcription failed: {}", e),
-                            "actionable": false
-                        }),
-                    );
-
+                    // Non-actionable: remote/provider hiccups must not stop
+                    // recording. The worker loop below emits a
+                    // transcription-warning and continues with the next chunk.
                     Err(e)
                 }
             }

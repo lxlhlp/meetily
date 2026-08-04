@@ -295,9 +295,19 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             console.log('Transcription error count incremented:', newCount);
             return newCount;
           });
-          setIsProcessing(false);
-          console.log('Calling onRecordingStop(false) due to transcription error');
-          onRecordingStop(false);
+
+          // Only stop recording for actionable errors (e.g. local model
+          // missing/unloaded - recording without transcription is pointless).
+          // Non-actionable errors (e.g. MOSS server temporarily unreachable)
+          // must NOT interrupt recording - audio keeps being captured and
+          // subtitles resume once the server is back.
+          if (isActionable) {
+            setIsProcessing(false);
+            console.log('Calling onRecordingStop(false) due to actionable transcription error');
+            onRecordingStop(false);
+          } else {
+            console.log('Non-actionable transcription error - continuing recording');
+          }
 
           // For actionable errors (like model loading failures), the main page will handle showing the model selector
           // For regular errors, they are handled by useModalState global listener which shows a toast

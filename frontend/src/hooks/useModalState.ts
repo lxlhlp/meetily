@@ -163,6 +163,39 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
     };
   }, [showModal]);
 
+  // Transcription warnings (e.g. MOSS server temporarily unreachable) -
+  // throttled toast so the user knows subtitles stalled, but recording
+  // is NOT interrupted.
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+    let lastWarningAt = 0;
+
+    const setupWarningListener = async () => {
+      try {
+        unlistenFn = await listen<string>('transcription-warning', (event) => {
+          const now = Date.now();
+          if (now - lastWarningAt < 30000) return; // throttle: 1 per 30s
+          lastWarningAt = now;
+          console.warn('Transcription warning:', event.payload);
+          toast.error('', {
+            description: String(event.payload),
+            duration: 5000,
+          });
+        });
+      } catch (error) {
+        console.error('Failed to setup transcription warning listener:', error);
+      }
+    };
+
+    setupWarningListener();
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
   // Listen for model download completion to auto-close modal
   useEffect(() => {
     const setupDownloadListeners = async () => {

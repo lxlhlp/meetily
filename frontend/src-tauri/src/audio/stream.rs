@@ -241,20 +241,20 @@ impl AudioStream {
     ) -> Result<Stream> {
         let config_copy = config.clone();
 
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => {
-                let capture_clone = capture.clone();
-                device.build_input_stream(
-                    &config_copy.into(),
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        capture.process_audio_data(data);
-                    },
-                    move |err| {
-                        capture_clone.handle_stream_error(err);
-                    },
-                    None,
-                )?
-            }
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => {
+            let capture_clone = capture.clone();
+            device.build_input_stream(
+                &config_copy.into(),
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    capture.process_audio_data(data);
+                },
+                move |err| {
+                    capture_clone.handle_stream_error(err);
+                },
+                None,
+            )?
+        }
             cpal::SampleFormat::I16 => {
                 let capture_clone = capture.clone();
                 device.build_input_stream(

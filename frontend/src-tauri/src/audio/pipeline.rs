@@ -85,8 +85,22 @@ impl AudioMixerRingBuffer {
     }
 
     fn can_mix(&self) -> bool {
+        // Require the microphone buffer to have a full window before mixing.
+        // The previous OR logic let a steady stream of silent system-audio
+        // frames (e.g. CoreAudio tap returning zeros when permission is
+        // denied or nothing is playing) trigger mixing while the mic buffer
+        // was nearly empty - extract_window then zero-padded the mic,
+        // producing recordings that were ~98% silence.
+        //
+        // Mic is the primary input; if system is short it gets zero-padded
+        // (harmless), but we never emit a window that is mostly mic padding.
+        //
+        // Fallback: when mic_buffer is entirely empty (mic stream never
+        // delivered any data - e.g. system-audio-only recording, or mic
+        // stream failed silently), let system drive mixing so a pure
+        // system-audio capture still works.
         self.mic_buffer.len() >= self.window_size_samples ||
-        self.system_buffer.len() >= self.window_size_samples
+        (self.system_buffer.len() >= self.window_size_samples && self.mic_buffer.is_empty())
     }
 
     fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
