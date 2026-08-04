@@ -76,6 +76,28 @@ const zhCN: Dictionary = {
     mossSaved: 'MOSS 配置已保存',
     connectedModels: '连接成功，可用模型：{models}',
     mossLiveHint: '实时模式按句转写，说话人标签（[S01]、[S02]…）跨句可能漂移；会议结束后运行「精转」可获得全局一致的标签。',
+    speakerLibrary: '说话人档案库',
+    speakers: '说话人',
+    speakerEmpty: '暂无说话人档案。MOSS 精转或导入后会自动为每位说话人建档。',
+    speakerPlaySample: '播放示例音频以确认声纹',
+    speakerNoSample: '该档案没有示例音频',
+    speakerSampleMissing: '示例音频文件不存在，可能已被删除',
+    speakerPlayFailed: '音频播放失败，示例文件可能已损坏',
+    speakerMeetings: '出现在 {count} 个会议中',
+    speakerRename: '改名',
+    speakerRenamed: '姓名已更新',
+    speakerMerge: '合并到首位',
+    speakerMergeToFirst: '将此人合并到列表第一个档案（可能是同一人）',
+    speakerMerged: '已合并',
+    speakerDeleteConfirm: '确认删除「{name}」的声纹档案？示例音频将一并删除。',
+    speakerDeleted: '已删除',
+    speakerHint: '点击 ▶ 试听声纹，确认是谁后编辑姓名；下次会议会自动匹配同名。',
+    configBackup: '配置备份',
+    configExport: '导出配置',
+    configImport: '导入配置',
+    configExported: '配置已导出到所选文件',
+    configImported: '配置已导入，即将刷新页面…',
+    configImportConfirm: '导入配置会覆盖当前所有设置（转写引擎、摘要模型、API Key）。确定继续？',
   },
   meeting: {
     retranscribe: '精转',
@@ -165,6 +187,28 @@ const en: Dictionary = {
     mossSaved: 'MOSS configuration saved.',
     connectedModels: 'Connected. Available models: {models}',
     mossLiveHint: 'Live mode transcribes per utterance with a short delay; speaker labels ([S01], [S02]…) may drift between sentences. Run "Retranscribe" after the meeting for globally consistent speaker labels.',
+    speakerLibrary: 'Speaker Profiles',
+    speakers: 'Speakers',
+    speakerEmpty: 'No speaker profiles yet. MOSS retranscription or import creates one per speaker automatically.',
+    speakerPlaySample: 'Play sample audio to confirm the voiceprint',
+    speakerNoSample: 'This profile has no sample audio',
+    speakerSampleMissing: 'Sample audio file is missing, it may have been deleted',
+    speakerPlayFailed: 'Playback failed - the sample file may be corrupted',
+    speakerMeetings: 'Appears in {count} meeting(s)',
+    speakerRename: 'Rename',
+    speakerRenamed: 'Name updated',
+    speakerMerge: 'Merge to first',
+    speakerMergeToFirst: 'Merge this profile into the first one (likely the same person)',
+    speakerMerged: 'Merged',
+    speakerDeleteConfirm: 'Delete the voiceprint profile of "{name}"? Its sample audio will also be removed.',
+    speakerDeleted: 'Deleted',
+    speakerHint: 'Click ▶ to audition the voiceprint, confirm who it is, then edit the name; future meetings match it automatically.',
+    configBackup: 'Configuration Backup',
+    configExport: 'Export Settings',
+    configImport: 'Import Settings',
+    configExported: 'Configuration exported to the selected file',
+    configImported: 'Configuration imported, reloading page…',
+    configImportConfirm: 'Importing overwrites all current settings (transcription engine, summary model, API keys). Continue?',
   },
   meeting: {
     retranscribe: 'Retranscribe',
@@ -240,7 +284,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         key;
       if (vars) {
         for (const [k, v] of Object.entries(vars)) {
-          text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+          // Escape $ in the replacement value: String.replace treats $$
+          // specially ($&, $1, $`, $'). Without escaping, a value like
+          // "财务$组" would mangle the output.
+          const safe = String(v).replace(/\$/g, '$$$$');
+          text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), safe);
         }
       }
       return text;

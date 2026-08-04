@@ -275,3 +275,236 @@ pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
     info!("Opened database folder: {}", folder_path);
     Ok(())
 }
+
+/// Export all configuration (settings + transcript_settings rows) to a JSON
+/// file chosen by the user via a save dialog. Contains no meeting data.
+#[tauri::command]
+pub async fn export_settings_command(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    info!("Exporting settings to JSON file");
+
+    // Open a save dialog (blocking on a spawn_blocking thread to avoid
+    // freezing the async runtime).
+    let app_clone = app.clone();
+    let file_path = tokio::task::spawn_blocking(move || {
+        app_clone
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name("meetily-config.json")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("Dialog error: {}", e))?;
+
+    let path = match file_path {
+        Some(p) => p.to_string(),
+        None => {
+            info!("User cancelled export dialog");
+            return Ok("cancelled".to_string());
+        }
+    };
+
+    let pool = state.db_manager.pool();
+
+    // Read the full settings row as a JSON value (transparent passthrough
+    // of JSON-in-JSON columns like mossTranscriptionConfig).
+    let settings_row: Option<serde_json::Value> = sqlx::query("SELECT * FROM settings WHERE id = '1'")
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("Failed to read settings: {}", e))?
+        .map(|row| {
+            use sqlx::Row;
+            // Reconstruct a JSON object from the row columns.
+            serde_json::json!({
+                "id": row.try_get::<String, _>("id").unwrap_or_default(),
+                "provider": row.try_get::<String, _>("provider").unwrap_or_default(),
+                "model": row.try_get::<String, _>("model").unwrap_or_default(),
+                "whisperModel": row.try_get::<String, _>("whisperModel").unwrap_or_default(),
+                "groqApiKey": row.try_get::<Option<String>, _>("groqApiKey").ok().flatten(),
+                "openaiApiKey": row.try_get::<Option<String>, _>("openaiApiKey").ok().flatten(),
+                "anthropicApiKey": row.try_get::<Option<String>, _>("anthropicApiKey").ok().flatten(),
+                "ollamaApiKey": row.try_get::<Option<String>, _>("ollamaApiKey").ok().flatten(),
+                "openRouterApiKey": row.try_get::<Option<String>, _>("openRouterApiKey").ok().flatten(),
+                "ollamaEndpoint": row.try_get::<Option<String>, _>("ollamaEndpoint").ok().flatten(),
+                "customOpenAIConfig": row.try_get::<Option<String>, _>("customOpenAIConfig").ok().flatten()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                "geminiApiKey": row.try_get::<Option<String>, _>("geminiApiKey").ok().flatten(),
+                "mossTranscriptionConfig": row.try_get::<Option<String>, _>("mossTranscriptionConfig").ok().flatten()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+            })
+        });
+
+    // Read the transcript_settings row.
+    let transcript_row: Option<serde_json::Value> = sqlx::query(
+        "SELECT * FROM transcript_settings WHERE id = '1'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to read transcript_settings: {}", e))?
+    .map(|row| {
+        use sqlx::Row;
+        serde_json::json!({
+            "id": row.try_get::<String, _>("id").unwrap_or_default(),
+            "provider": row.try_get::<String, _>("provider").unwrap_or_default(),
+            "model": row.try_get::<String, _>("model").unwrap_or_default(),
+            "whisperApiKey": row.try_get::<Option<String>, _>("whisperApiKey").ok().flatten(),
+            "deepgramApiKey": row.try_get::<Option<String>, _>("deepgramApiKey").ok().flatten(),
+            "elevenLabsApiKey": row.try_get::<Option<String>, _>("elevenLabsApiKey").ok().flatten(),
+            "groqApiKey": row.try_get::<Option<String>, _>("groqApiKey").ok().flatten(),
+            "openaiApiKey": row.try_get::<Option<String>, _>("openaiApiKey").ok().flatten(),
+        })
+    });
+
+    let export = serde_json::json!({
+        "version": "1.0",
+        "exported_at": chrono::Utc::now().to_rfc3339(),
+        "settings": settings_row,
+        "transcript_settings": transcript_row,
+    });
+
+    let json_str = serde_json::to_string_pretty(&export)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    std::fs::write(&path, json_str)
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    info!("Settings exported to {}", path);
+    Ok(path)
+}
+
+/// Import configuration from a JSON file, overwriting existing settings.
+#[tauri::command]
+pub async fn import_settings_command(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    info!("Importing settings from JSON file");
+
+    // Open a file picker (blocking on spawn_blocking).
+    let app_clone = app.clone();
+    let file_path = tokio::task::spawn_blocking(move || {
+        app_clone
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("Dialog error: {}", e))?;
+
+    let path = match file_path {
+        Some(p) => p.to_string(),
+        None => {
+            info!("User cancelled import dialog");
+            return Ok("cancelled".to_string());
+        }
+    };
+
+    let json_str = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read config file: {}", e))?;
+
+    let import: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("Invalid config file format: {}", e))?;
+
+    let pool = state.db_manager.pool();
+
+    // Overwrite settings row.
+    if let Some(settings) = import.get("settings").filter(|s| !s.is_null()) {
+        let provider = settings.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+        let model = settings.get("model").and_then(|v| v.as_str()).unwrap_or("");
+        let whisper_model = settings.get("whisperModel").and_then(|v| v.as_str()).unwrap_or("");
+        let ollama_endpoint = settings.get("ollamaEndpoint").and_then(|v| v.as_str());
+
+        crate::database::repositories::setting::SettingsRepository::save_model_config(
+            pool, provider, model, whisper_model, ollama_endpoint,
+        )
+        .await
+        .map_err(|e| format!("Failed to write settings: {}", e))?;
+
+        // Save API keys (best-effort, ignore individual failures).
+        for key_col in &[
+            ("groqApiKey", "groq"),
+            ("openaiApiKey", "openai"),
+            ("anthropicApiKey", "anthropic"),
+            ("ollamaApiKey", "ollama"),
+            ("openRouterApiKey", "openrouter"),
+            ("geminiApiKey", "gemini"),
+        ] {
+            if let Some(val) = settings.get(key_col.0).and_then(|v| v.as_str()) {
+                if !val.is_empty() {
+                    let _ = crate::database::repositories::setting::SettingsRepository::save_api_key(
+                        pool, key_col.1, val,
+                    )
+                    .await;
+                }
+            }
+        }
+
+        // Save JSON config columns.
+        if let Some(custom_cfg) = settings.get("customOpenAIConfig") {
+            if !custom_cfg.is_null() {
+                let cfg_str = serde_json::to_string(custom_cfg).unwrap_or_default();
+                let _ = sqlx::query(
+                    "INSERT INTO settings (id, provider, model, whisperModel, customOpenAIConfig)
+                     VALUES ('1', 'openai', 'gpt-4o', 'large-v3', $1)
+                     ON CONFLICT(id) DO UPDATE SET customOpenAIConfig = excluded.customOpenAIConfig",
+                )
+                .bind(&cfg_str)
+                .execute(pool)
+                .await;
+            }
+        }
+        if let Some(moss_cfg) = settings.get("mossTranscriptionConfig") {
+            if !moss_cfg.is_null() {
+                let cfg_str = serde_json::to_string(moss_cfg).unwrap_or_default();
+                let _ = sqlx::query(
+                    "INSERT INTO settings (id, provider, model, whisperModel, mossTranscriptionConfig)
+                     VALUES ('1', 'openai', 'gpt-4o', 'large-v3', $1)
+                     ON CONFLICT(id) DO UPDATE SET mossTranscriptionConfig = excluded.mossTranscriptionConfig",
+                )
+                .bind(&cfg_str)
+                .execute(pool)
+                .await;
+            }
+        }
+    }
+
+    // Overwrite transcript_settings row.
+    if let Some(ts) = import.get("transcript_settings").filter(|s| !s.is_null()) {
+        let provider = ts.get("provider").and_then(|v| v.as_str()).unwrap_or("localWhisper");
+        let model = ts.get("model").and_then(|v| v.as_str()).unwrap_or("large-v3");
+        crate::database::repositories::setting::SettingsRepository::save_transcript_config(
+            pool, provider, model,
+        )
+        .await
+        .map_err(|e| format!("Failed to write transcript settings: {}", e))?;
+
+        // Save transcript API keys (best-effort).
+        for key_col in &[
+            ("whisperApiKey", "whisper"),
+            ("deepgramApiKey", "deepgram"),
+            ("elevenLabsApiKey", "elevenLabs"),
+            ("groqApiKey", "groq"),
+            ("openaiApiKey", "openai"),
+        ] {
+            if let Some(val) = ts.get(key_col.0).and_then(|v| v.as_str()) {
+                if !val.is_empty() {
+                    let _ = crate::database::repositories::setting::SettingsRepository::save_transcript_api_key(
+                        pool, key_col.1, val,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
+    info!("Settings imported from {}", path);
+    Ok(path)
+}

@@ -661,6 +661,11 @@ pub fn run() {
             api::api_save_moss_config,
             api::api_get_moss_config,
             api::api_test_moss_connection,
+            // Speaker profile library commands
+            api::api_speaker_list,
+            api::api_speaker_update_name,
+            api::api_speaker_merge,
+            api::api_speaker_delete,
             // Summary commands
             summary::commands::api_process_transcript,
             summary::commands::api_get_summary,
@@ -733,6 +738,9 @@ pub fn run() {
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            // Settings import/export commands
+            database::commands::export_settings_command,
+            database::commands::import_settings_command,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,

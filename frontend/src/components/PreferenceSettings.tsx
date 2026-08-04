@@ -2,13 +2,16 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { FolderOpen, Download, Upload } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
+import { toast } from "sonner"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { useI18n } from "@/i18n"
 
 export function PreferenceSettings() {
+  const { t } = useI18n();
   const {
     notificationSettings,
     storageLocations,
@@ -133,6 +136,29 @@ export function PreferenceSettings() {
     }
   };
 
+  const handleExportConfig = async () => {
+    try {
+      const result = await invoke<string>('export_settings_command');
+      if (result === 'cancelled') return;
+      toast.success(t('settings.configExported'));
+    } catch (error) {
+      toast.error(String(error));
+    }
+  };
+
+  const handleImportConfig = async () => {
+    if (!window.confirm(t('settings.configImportConfirm'))) return;
+    try {
+      const result = await invoke<string>('import_settings_command');
+      if (result === 'cancelled') return;
+      toast.success(t('settings.configImported'));
+      // Reload so the frontend picks up the new config from DB.
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (error) {
+      toast.error(String(error));
+    }
+  };
+
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
     return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
@@ -223,6 +249,30 @@ export function PreferenceSettings() {
       {/* Analytics Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <AnalyticsConsentSwitch />
+      </div>
+
+      {/* Configuration Backup Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-2">{t('settings.configBackup')}</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          {t('settings.configExport')} / {t('settings.configImport')} — MOSS, Qwen, API Keys
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportConfig}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            {t('settings.configExport')}
+          </button>
+          <button
+            onClick={handleImportConfig}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            {t('settings.configImport')}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -36,7 +36,11 @@ impl CustomOpenAIConfig {
     pub fn built_in_default() -> Self {
         Self {
             endpoint: crate::config::DEFAULT_CUSTOM_OPENAI_ENDPOINT.to_string(),
-            api_key: Some(crate::config::DEFAULT_CUSTOM_OPENAI_API_KEY.to_string()),
+            api_key: if crate::config::DEFAULT_CUSTOM_OPENAI_API_KEY.is_empty() {
+                None
+            } else {
+                Some(crate::config::DEFAULT_CUSTOM_OPENAI_API_KEY.to_string())
+            },
             model: crate::config::DEFAULT_CUSTOM_OPENAI_MODEL.to_string(),
             max_tokens: None,
             temperature: None,
