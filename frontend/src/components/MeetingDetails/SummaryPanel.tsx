@@ -55,6 +55,8 @@ interface SummaryPanelProps {
   summaryError: string | null;
   onRegenerateSummary: () => Promise<void>;
   getSummaryStatusMessage: (status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error') => string;
+  streamingContent?: string;
+  streamingReasoning?: string;
   availableTemplates: Array<{ id: string, name: string, description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
@@ -91,6 +93,8 @@ export function SummaryPanel({
   summaryError,
   onRegenerateSummary,
   getSummaryStatusMessage,
+  streamingContent,
+  streamingReasoning,
   availableTemplates,
   selectedTemplate,
   onTemplateSelect,
@@ -327,13 +331,36 @@ export function SummaryPanel({
               onOpenModelSettings={onOpenModelSettings}
             />
           </div>
-          {/* Loading spinner */}
-          <div className="flex items-center justify-center flex-1">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+          {streamingContent || streamingReasoning ? (
+            /* Live streaming preview while tokens arrive */
+            <div className="flex-1 overflow-y-auto min-h-0 px-6 pb-6">
+              <BlockNoteSummaryView
+                ref={summaryRef}
+                summaryData={aiSummary}
+                onSave={onSaveSummary}
+                onSummaryChange={onSummaryChange}
+                onDirtyChange={onDirtyChange}
+                status={summaryStatus}
+                error={summaryError}
+                onRegenerateSummary={onRegenerateSummary}
+                meeting={{
+                  id: meeting.id,
+                  title: meetingTitle,
+                  created_at: meeting.created_at
+                }}
+                streamingContent={streamingContent}
+                streamingReasoning={streamingReasoning}
+              />
             </div>
-          </div>
+          ) : (
+            /* Loading spinner (before first chunk arrives) */
+            <div className="flex items-center justify-center flex-1">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                <p className="text-gray-600">Generating AI Summary...</p>
+              </div>
+            </div>
+          )}
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
@@ -429,6 +456,8 @@ export function SummaryPanel({
                 title: meetingTitle,
                 created_at: meeting.created_at
               }}
+              streamingContent={streamingContent}
+              streamingReasoning={streamingReasoning}
             />
           </div>
           {summaryStatus !== 'idle' && (

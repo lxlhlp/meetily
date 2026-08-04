@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
@@ -77,8 +78,59 @@ export function useSummaryGeneration({
   // Last custom prompt used for generation, reused on regenerate
   const lastCustomPromptRef = useRef<string>('');
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  // Real-time streaming content (accumulated via SSE). Thinking/reasoning is
+  // kept separate so it only shows in the collapsible fold, never in the body.
+  const [streamingContent, setStreamingContent] = useState<string>('');
+  const [streamingReasoning, setStreamingReasoning] = useState<string>('');
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+
+  // Listen for real-time summary streaming events from Rust
+  useEffect(() => {
+    if (!meeting?.id) return;
+    let unlisten: (() => void) | undefined;
+
+    const setup = async () => {
+      try {
+        unlisten = await listen<{
+          meetingId: string;
+          chunk: string;
+          isReasoning: boolean;
+        }>('summary-stream', (event) => {
+          if (event.payload.meetingId !== meeting.id) return;
+
+          if (event.payload.isReasoning) {
+            // Thinking goes to the fold only (state, so it renders live)
+            setStreamingReasoning(prev => prev + event.payload.chunk);
+            return;
+          }
+          // Update UI state directly (Tauri emit already throttled to 50ms)
+          setStreamingContent(prev => prev + event.payload.chunk);
+        });
+      } catch (err) {
+        console.error('Failed to listen for summary-stream:', err);
+      }
+    };
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [meeting?.id]);
+
+  // Reset streaming state when summary starts or completes
+  useEffect(() => {
+    if (
+      summaryStatus === 'processing' ||
+      summaryStatus === 'summarizing' ||
+      summaryStatus === 'regenerating' ||
+      summaryStatus === 'completed' ||
+      summaryStatus === 'error'
+    ) {
+      setStreamingReasoning('');
+      setStreamingContent('');
+    }
+  }, [summaryStatus]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -673,6 +725,8 @@ export function useSummaryGeneration({
   return {
     summaryStatus,
     summaryError,
+    streamingContent,
+    streamingReasoning,
     handleGenerateSummary,
     handleRegenerateSummary,
     handleStopGeneration,

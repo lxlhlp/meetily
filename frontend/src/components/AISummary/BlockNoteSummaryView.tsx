@@ -26,6 +26,10 @@ interface BlockNoteSummaryViewProps {
     created_at: string;
   };
   onDirtyChange?: (isDirty: boolean) => void;
+  /** Real-time streaming content (shown while generating, lightweight <pre> preview) */
+  streamingContent?: string;
+  /** Real-time thinking/reasoning content (folded in accordion) */
+  streamingReasoning?: string;
 }
 
 export interface BlockNoteSummaryViewRef {
@@ -73,7 +77,9 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   error = null,
   onRegenerateSummary,
   meeting,
-  onDirtyChange
+  onDirtyChange,
+  streamingContent = '',
+  streamingReasoning = '',
 }, ref) => {
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
@@ -217,6 +223,33 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     },
     isDirty
   }), [handleSave, isDirty, editor, format, currentBlocks, data]);
+
+  // Streaming preview: show real-time content while generating (lightweight
+  // <pre> instead of full BlockNote parse which is too slow per token).
+  if (
+    (status === 'processing' || status === 'summarizing' || status === 'regenerating') &&
+    (streamingContent || streamingReasoning)
+  ) {
+    return (
+      <div className="flex flex-col w-full">
+        {streamingReasoning && (
+          <details className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-900">
+              Thinking process ({streamingReasoning.length} chars)
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-gray-500">
+              {streamingReasoning}
+            </pre>
+          </details>
+        )}
+        {streamingContent && (
+          <pre className="w-full overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+            {streamingContent}
+          </pre>
+        )}
+      </div>
+    );
+  }
 
   // Render legacy format
   if (format === 'legacy') {

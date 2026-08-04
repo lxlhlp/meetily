@@ -247,6 +247,8 @@ export default function PageContent({
           summaryError={summaryGeneration.summaryError}
           onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
           getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+          streamingContent={summaryGeneration.streamingContent}
+          streamingReasoning={summaryGeneration.streamingReasoning}
           availableTemplates={templates.availableTemplates}
           selectedTemplate={templates.selectedTemplate}
           onTemplateSelect={templates.handleTemplateSelection}

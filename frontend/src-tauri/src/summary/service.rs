@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use once_cell::sync::Lazy;
@@ -162,6 +162,11 @@ fn extract_cached_english_markdown(
         Some(language) if language != "English" => language,
         _ => return Ok(None),
     };
+    // Chinese is generated directly in pass 1 (no English pass), so a cached
+    // summary is never a valid input for it.
+    if requested_language == "Chinese" {
+        return Ok(None);
+    }
 
     let value: serde_json::Value = serde_json::from_str(raw)?;
     let Some(cache_value) = value.get(ENGLISH_CACHE_FIELD) else {
@@ -174,6 +179,12 @@ fn extract_cached_english_markdown(
     };
 
     if cache.source != *expected_source {
+        return Ok(None);
+    }
+
+    // A Chinese-direct run caches its Chinese pass-1 output; that is never a
+    // valid English source for translating into another language.
+    if cache.output_language.as_deref() == Some("Chinese") {
         return Ok(None);
     }
 
@@ -283,7 +294,7 @@ impl SummaryService {
     /// the main thread. It updates the database with progress and results.
     ///
     /// # Arguments
-    /// * `_app` - Tauri app handle (for future use)
+    /// * `app` - Tauri app handle (used to emit real-time streaming events)
     /// * `pool` - SQLx connection pool
     /// * `meeting_id` - Unique identifier for the meeting
     /// * `text` - Full transcript text
@@ -292,7 +303,7 @@ impl SummaryService {
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
-        _app: AppHandle<R>,
+        app: AppHandle<R>,
         pool: SqlitePool,
         meeting_id: String,
         text: String,
@@ -448,7 +459,7 @@ impl SummaryService {
         };
 
         // Get app data directory for BuiltInAI provider
-        let app_data_dir = _app.path().app_data_dir().ok();
+        let app_data_dir = app.path().app_data_dir().ok();
 
         if let Some(code) = &summary_language {
             info!("📝 Summary language preference: {}", code);
@@ -516,6 +527,42 @@ impl SummaryService {
         };
 
         let client = reqwest::Client::new();
+
+        // Throttled streaming callback: emit summary-stream events at most
+        // every 50ms (or when 20+ new characters accumulate) to avoid
+        // flooding the frontend with per-token events.
+        let app_for_stream = app.clone();
+        let meeting_id_for_stream = meeting_id.clone();
+        let last_emit = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let accumulated = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+
+        let mut stream_callback = move |chunk: &str, is_reasoning: bool| {
+            let mut buf = accumulated.lock().unwrap();
+            buf.push_str(chunk);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let last = last_emit.load(std::sync::atomic::Ordering::Relaxed);
+            // Emit every 50ms OR when buffer grows large
+            if now - last >= 50 || buf.len() >= 200 {
+                let text = buf.clone();
+                buf.clear();
+                last_emit.store(now, std::sync::atomic::Ordering::Relaxed);
+                let result = app_for_stream.emit(
+                    "summary-stream",
+                    serde_json::json!({
+                        "meetingId": meeting_id_for_stream,
+                        "chunk": text,
+                        "isReasoning": is_reasoning,
+                    }),
+                );
+                if let Err(e) = &result {
+                    warn!("summary-stream emit failed: {}", e);
+                }
+            }
+        };
+
         let result = generate_meeting_summary(
             &client,
             &provider,
@@ -536,6 +583,7 @@ impl SummaryService {
             summary_language.as_deref(),
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
+            Some(&mut stream_callback),
         )
         .await;
 
@@ -797,6 +845,42 @@ mod tests {
 
         assert_eq!(
             extract_cached_english_markdown(&raw, &source, Some("fr")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_chinese_target_never_reuses_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &source, Some("zh-CN")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_chinese_direct_cache_not_reused_as_english_source() {
+        // A Chinese-direct run stores its Chinese pass-1 output in the cache;
+        // it must never be reused as the English source for another language.
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# 会议纪要\n## 要点\n中文正文",
+            "# 会议纪要\n## 要点\n中文正文",
+            source.clone(),
+            Some("zh-CN"),
+        )
+        .to_string();
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &source, Some("de")).unwrap(),
             None
         );
     }
