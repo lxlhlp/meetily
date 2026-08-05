@@ -477,10 +477,13 @@ export function SummaryPanel({
               streamingReasoning={streamingReasoning}
             />
           </div>
-          {summaryStatus !== 'idle' && (
+          {/* Status banner: shown for in-progress and error states only.
+              'completed' is excluded - the success toast (4s auto-dismiss)
+              already covers it, and a persistent banner never goes away
+              because summaryStatus stays 'completed' until page reload. */}
+          {summaryStatus !== 'idle' && summaryStatus !== 'completed' && (
             <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
-              summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                'bg-blue-100 text-blue-700'
+              'bg-blue-100 text-blue-700'
               }`}>
               <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
             </div>
