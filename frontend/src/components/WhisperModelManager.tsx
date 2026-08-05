@@ -40,6 +40,10 @@ export function ModelManager({
   // Refs for stable callbacks
   const onModelSelectRef = useRef(onModelSelect);
   const autoSaveRef = useRef(autoSave);
+  // t lives in a ref so the once-registered event listeners below always
+  // translate with the CURRENT locale, not the first-render one.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
@@ -181,8 +185,8 @@ export function ModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(t('models.modelDownloadSuccess'), {
-            description: t('models.downloadedAndReady'),
+          toast.success(tRef.current('models.modelDownloadSuccess'), {
+            description: tRef.current('models.downloadedAndReady'),
             duration: 4000
           });
 
@@ -219,11 +223,11 @@ export function ModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.error(t('models.modelDownloadFailed'), {
+          toast.error(tRef.current('models.modelDownloadFailed'), {
             description: error,
             duration: 6000,
             action: {
-              label: t('common.retry'),
+              label: tRef.current('common.retry'),
               onClick: () => downloadModel(modelName)
             }
           });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,10 @@ export function BuiltInModelManager({
   layout = 'inline',
 }: BuiltInModelManagerProps) {
   const { t } = useI18n();
+  // t lives in a ref so the once-registered event listeners below always
+  // translate with the CURRENT locale, not the first-render one.
+  const tRef = useRef(t);
+  tRef.current = t;
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
@@ -64,7 +68,7 @@ export function BuiltInModelManager({
       }
     } catch (error) {
       console.error('Failed to fetch built-in AI models:', error);
-      toast.error(t('models.modelLoadFailed'));
+      toast.error(tRef.current('models.modelLoadFailed'));
     } finally {
       setIsLoading(false);
       setHasFetched(true);
@@ -129,7 +133,7 @@ export function BuiltInModelManager({
           });
           // Refresh models list
           fetchModels();
-          toast.success(t('models.modelDownloadSuccess'));
+          toast.success(tRef.current('models.modelDownloadSuccess'));
         }
 
         // Handle cancelled status

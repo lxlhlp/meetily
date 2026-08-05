@@ -17,7 +17,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   // State
   // Use prop directly since summary generation fetches transcripts independently
   const transcripts = meeting.transcripts;
-  const [meetingTitle, setMeetingTitle] = useState(meeting.title || t('sidebar.newCall'));
+  // The title placeholder is computed at render time (see `meetingTitle` below)
+  // so it follows the current UI language instead of freezing the first one.
+  const [meetingTitle, setMeetingTitle] = useState(meeting.title || '');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
@@ -157,7 +159,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   return {
     // State
     transcripts,
-    meetingTitle,
+    // Display title: falls back to a localized placeholder when the meeting
+    // has no title yet (computed per render so it tracks the UI language)
+    meetingTitle: meetingTitle || t('sidebar.newCall'),
     isEditingTitle,
     isTitleDirty,
     aiSummary,

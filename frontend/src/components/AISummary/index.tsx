@@ -687,14 +687,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleCopyBlocks}
           >
             <span className="text-gray-600">📋</span>
-            <span>{t('aiSummary.copyBlocks', { count: selectedBlocks.length })}</span>
+            <span>{selectedBlocks.length === 1 ? t('aiSummary.copyBlock') : t('aiSummary.copyBlocks', { count: selectedBlocks.length })}</span>
           </button>
           <button
             className="w-full px-4 py-2 text-left hover:bg-gray-100 text-red-600 flex items-center space-x-2"
             onClick={handleDeleteBlocks}
           >
             <span>🗑️</span>
-            <span>{t('aiSummary.deleteBlocks', { count: selectedBlocks.length })}</span>
+            <span>{selectedBlocks.length === 1 ? t('aiSummary.deleteBlock') : t('aiSummary.deleteBlocks', { count: selectedBlocks.length })}</span>
           </button>
         </div>
       )}
