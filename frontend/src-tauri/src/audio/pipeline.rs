@@ -20,6 +20,7 @@ struct AudioMixerRingBuffer {
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
     max_buffer_size: usize,  // Safety limit (e.g., 100ms)
+    sample_rate: u32,
     // Overflow accounting for rate-limited logging (steady-state overflow
     // would otherwise spam one error line per audio chunk)
     mic_overflow_dropped: usize,
@@ -48,6 +49,7 @@ impl AudioMixerRingBuffer {
             system_buffer: VecDeque::with_capacity(max_buffer_size),
             window_size_samples,
             max_buffer_size,
+            sample_rate,
             mic_overflow_dropped: 0,
             system_overflow_dropped: 0,
             last_overflow_log: None,
@@ -96,13 +98,31 @@ impl AudioMixerRingBuffer {
                 .map(|t| t.elapsed() >= std::time::Duration::from_secs(5))
                 .unwrap_or(true);
             if should_log {
-                error!(
-                    "🔴 Ring buffer overflow: dropped mic={} sys={} samples since last report ({}ms/{:.1}% sys of real-time) - streams arriving faster than mic-driven mixing drains; recording may contain glitches",
-                    self.mic_overflow_dropped,
-                    self.system_overflow_dropped,
-                    self.system_overflow_dropped * 1000 / 48000,
-                    self.system_overflow_dropped as f64 / 480.0 / self.last_overflow_log.map(|t| t.elapsed().as_secs_f64()).unwrap_or(1.0),
-                );
+                let dropped_ms = self.system_overflow_dropped * 1000 / self.sample_rate as usize;
+                match self.last_overflow_log {
+                    Some(last) => {
+                        // Subsequent reports: elapsed window is known, so the
+                        // dropped share can be expressed as % of real-time.
+                        let elapsed = last.elapsed().as_secs_f64();
+                        error!(
+                            "🔴 Ring buffer overflow: dropped mic={} sys={} samples since last report ({}ms/{:.1}% sys of real-time) - streams arriving faster than mic-driven mixing drains; recording may contain glitches",
+                            self.mic_overflow_dropped,
+                            self.system_overflow_dropped,
+                            dropped_ms,
+                            self.system_overflow_dropped as f64 / (self.sample_rate as f64 * elapsed / 100.0),
+                        );
+                    }
+                    None => {
+                        // First occurrence: no elapsed window yet, report the
+                        // dropped amount only (a percentage would be meaningless).
+                        error!(
+                            "🔴 Ring buffer overflow: dropped mic={} sys={} samples ({}ms) - streams arriving faster than mic-driven mixing drains; recording may contain glitches",
+                            self.mic_overflow_dropped,
+                            self.system_overflow_dropped,
+                            dropped_ms,
+                        );
+                    }
+                }
                 self.mic_overflow_dropped = 0;
                 self.system_overflow_dropped = 0;
                 self.last_overflow_log = Some(std::time::Instant::now());

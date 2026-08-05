@@ -133,7 +133,7 @@ pub struct RecordingState {
     last_mic_chunk: Mutex<Option<Instant>>,
     last_system_chunk: Mutex<Option<Instant>>,
     // Notified (once per stall episode) when a stream stops delivering chunks
-    stall_callback: Mutex<Option<Box<dyn Fn(DeviceType) + Send + Sync>>>,
+    stall_callback: Mutex<Option<std::sync::Arc<dyn Fn(DeviceType) + Send + Sync>>>,
 }
 
 impl RecordingState {
@@ -320,13 +320,18 @@ impl RecordingState {
     where
         F: Fn(DeviceType) + Send + Sync + 'static,
     {
-        *self.stall_callback.lock().unwrap() = Some(Box::new(callback));
+        *self.stall_callback.lock().unwrap() = Some(std::sync::Arc::new(callback));
     }
 
     /// Notify listeners that a stream has stalled (called by the watchdog,
     /// once per stall episode).
     pub fn notify_stall(&self, device_type: DeviceType) {
-        if let Some(callback) = self.stall_callback.lock().unwrap().as_ref() {
+        // Clone the Arc and drop the mutex guard before invoking the callback
+        // so the lock is never held across user code (the callback could grow
+        // heavier than the current app.emit, and this path runs on the audio
+        // thread). The Arc keeps the callback registered for later episodes.
+        let callback = self.stall_callback.lock().unwrap().clone();
+        if let Some(callback) = callback {
             callback(device_type);
         }
     }

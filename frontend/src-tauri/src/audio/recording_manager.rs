@@ -156,6 +156,10 @@ impl RecordingManager {
             tokio::spawn(async move {
                 let mut mic_stalled = false;
                 let mut system_stalled = false;
+                // Grace period measured from watchdog startup (not recording
+                // duration, which stalls while paused): streams may take a
+                // moment to deliver their first chunk after start.
+                let watchdog_started = std::time::Instant::now();
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     if !state.is_recording() {
@@ -164,8 +168,7 @@ impl RecordingManager {
                     if !state.is_active() {
                         continue; // paused
                     }
-                    // Grace period: streams may take a moment to deliver first chunk
-                    if state.get_recording_duration().unwrap_or(0.0) < STARTUP_GRACE_SECS {
+                    if watchdog_started.elapsed().as_secs_f64() < STARTUP_GRACE_SECS {
                         continue;
                     }
 
