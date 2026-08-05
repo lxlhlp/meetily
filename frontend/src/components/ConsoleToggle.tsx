@@ -3,10 +3,26 @@ import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
 
 export function ConsoleToggle() {
   const [isLoading, setIsLoading] = useState(false);
   const [consoleVisible, setConsoleVisible] = useState(false);
+  const { t } = useI18n();
+
+  const handleOpenLogsFolder = async () => {
+    setIsLoading(true);
+    try {
+      const path = await invoke<string>('open_logs_folder');
+      toast.success(path);
+    } catch (error) {
+      console.error('Failed to open logs folder:', error);
+      toast.error(String(error));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleToggleConsole = async () => {
     setIsLoading(true);
@@ -83,7 +99,18 @@ export function ConsoleToggle() {
         >
           Toggle Console
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleOpenLogsFolder}
+          disabled={isLoading}
+        >
+          {t('settings.openLogsFolder')}
+        </Button>
       </div>
+      <p className="text-sm text-muted-foreground">
+        {t('settings.logsFolderHint')}
+      </p>
       <p className="text-sm text-muted-foreground">
         Show or hide the developer console window. On Windows, this controls the console window. On macOS, this opens Terminal with app logs.
       </p>

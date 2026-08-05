@@ -20,6 +20,11 @@ struct AudioMixerRingBuffer {
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
     max_buffer_size: usize,  // Safety limit (e.g., 100ms)
+    // Overflow accounting for rate-limited logging (steady-state overflow
+    // would otherwise spam one error line per audio chunk)
+    mic_overflow_dropped: usize,
+    system_overflow_dropped: usize,
+    last_overflow_log: Option<std::time::Instant>,
 }
 
 impl AudioMixerRingBuffer {
@@ -43,6 +48,9 @@ impl AudioMixerRingBuffer {
             system_buffer: VecDeque::with_capacity(max_buffer_size),
             window_size_samples,
             max_buffer_size,
+            mic_overflow_dropped: 0,
+            system_overflow_dropped: 0,
+            last_overflow_log: None,
         }
     }
 
@@ -62,25 +70,43 @@ impl AudioMixerRingBuffer {
             DeviceType::System => self.system_buffer.extend(samples),
         }
 
-        // CRITICAL FIX: Add warnings before dropping samples
-        // This helps diagnose timing issues in production
+        // Count overflow drops instead of logging per-chunk - a sustained
+        // rate mismatch (e.g. Bluetooth mic delivering slower than real-time)
+        // would otherwise spam one error line per chunk (~20/sec).
         if self.mic_buffer.len() > self.max_buffer_size {
-            warn!("⚠️ Microphone buffer overflow: {} > {} samples, dropping oldest {} samples",
-                  self.mic_buffer.len(), self.max_buffer_size,
-                  self.mic_buffer.len() - self.max_buffer_size);
+            self.mic_overflow_dropped += self.mic_buffer.len() - self.max_buffer_size;
         }
         if self.system_buffer.len() > self.max_buffer_size {
-            error!("🔴 SYSTEM AUDIO BUFFER OVERFLOW: {} > {} samples, dropping {} samples - THIS CAUSES DISTORTION!",
-                  self.system_buffer.len(), self.max_buffer_size,
-                  self.system_buffer.len() - self.max_buffer_size);
+            self.system_overflow_dropped += self.system_buffer.len() - self.max_buffer_size;
         }
 
-        // Safety: prevent buffer overflow (keep only last 200ms)
+        // Safety: prevent buffer overflow (keep only the most recent samples)
         while self.mic_buffer.len() > self.max_buffer_size {
             self.mic_buffer.pop_front();
         }
         while self.system_buffer.len() > self.max_buffer_size {
             self.system_buffer.pop_front();
+        }
+
+        // Rate-limited aggregated overflow report: first occurrence logs
+        // immediately, then at most one summary every 5 seconds.
+        if self.mic_overflow_dropped > 0 || self.system_overflow_dropped > 0 {
+            let should_log = self
+                .last_overflow_log
+                .map(|t| t.elapsed() >= std::time::Duration::from_secs(5))
+                .unwrap_or(true);
+            if should_log {
+                error!(
+                    "🔴 Ring buffer overflow: dropped mic={} sys={} samples since last report ({}ms/{:.1}% sys of real-time) - streams arriving faster than mic-driven mixing drains; recording may contain glitches",
+                    self.mic_overflow_dropped,
+                    self.system_overflow_dropped,
+                    self.system_overflow_dropped * 1000 / 48000,
+                    self.system_overflow_dropped as f64 / 480.0 / self.last_overflow_log.map(|t| t.elapsed().as_secs_f64()).unwrap_or(1.0),
+                );
+                self.mic_overflow_dropped = 0;
+                self.system_overflow_dropped = 0;
+                self.last_overflow_log = Some(std::time::Instant::now());
+            }
         }
     }
 

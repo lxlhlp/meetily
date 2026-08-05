@@ -121,6 +121,11 @@ impl RecordingManager {
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
+        // Stall watchdog monitors whichever streams are actually started.
+        // (Devices are moved into start_streams/monitor below, so capture flags first.)
+        let watch_mic = microphone_device.is_some();
+        let watch_system = system_device.is_some();
+
         // Start audio streams - they send RAW unmixed chunks to pipeline for mixing
         // Pipeline handles mixing and distribution to both recording and transcription
         self.stream_manager.start_streams(microphone_device.clone(), system_device.clone(), None).await?;
@@ -137,6 +142,61 @@ impl RecordingManager {
 
         info!("Recording manager started successfully with {} active streams",
                self.stream_manager.active_stream_count());
+
+        // Spawn stall watchdog: a capture stream can die silently (Core Audio
+        // stops delivering frames without firing the cpal error callback),
+        // which deadlocks mixing (can_mix waits for mic data forever) while
+        // the UI keeps showing "recording". Detect it via stream heartbeats.
+        {
+            use super::recording_state::DeviceType;
+            const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(3);
+            const STARTUP_GRACE_SECS: f64 = 5.0;
+
+            let state = self.state.clone();
+            tokio::spawn(async move {
+                let mut mic_stalled = false;
+                let mut system_stalled = false;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if !state.is_recording() {
+                        break;
+                    }
+                    if !state.is_active() {
+                        continue; // paused
+                    }
+                    // Grace period: streams may take a moment to deliver first chunk
+                    if state.get_recording_duration().unwrap_or(0.0) < STARTUP_GRACE_SECS {
+                        continue;
+                    }
+
+                    for (device_type, watching, stalled) in [
+                        (DeviceType::Microphone, watch_mic, &mut mic_stalled),
+                        (DeviceType::System, watch_system, &mut system_stalled),
+                    ] {
+                        if !watching {
+                            continue;
+                        }
+                        // `None` = no chunk ever received (after grace) → stalled
+                        let is_stalled = state
+                            .last_chunk_age(&device_type)
+                            .map(|age| age > STALL_THRESHOLD)
+                            .unwrap_or(true);
+                        if is_stalled && !*stalled {
+                            *stalled = true;
+                            log::error!(
+                                "🔇 {:?} stream STALLED: no audio chunks for >{}s while recording (silent capture failure)",
+                                device_type, STALL_THRESHOLD.as_secs()
+                            );
+                            state.notify_stall(device_type);
+                        } else if !is_stalled && *stalled {
+                            *stalled = false;
+                            log::info!("🔊 {:?} stream recovered, chunks flowing again", device_type);
+                        }
+                    }
+                }
+                log::debug!("Stall watchdog exited");
+            });
+        }
 
         Ok(transcription_receiver)
     }
@@ -422,6 +482,14 @@ impl RecordingManager {
         F: Fn(&super::recording_state::AudioError) + Send + Sync + 'static,
     {
         self.state.set_error_callback(callback);
+    }
+
+    /// Set callback notified when a capture stream stalls (no chunks without error)
+    pub fn set_stall_callback<F>(&self, callback: F)
+    where
+        F: Fn(super::recording_state::DeviceType) + Send + Sync + 'static,
+    {
+        self.state.set_stall_callback(callback);
     }
 
     /// Check if there's a fatal error

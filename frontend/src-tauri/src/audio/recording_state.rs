@@ -124,6 +124,16 @@ pub struct RecordingState {
     // Pause time tracking
     pause_start: Mutex<Option<Instant>>,
     total_pause_duration: Mutex<std::time::Duration>,
+
+    // Per-stream heartbeat: last time a chunk arrived from each capture stream.
+    // Used by the stall watchdog to detect a silently dead stream (e.g. Core
+    // Audio stops delivering mic frames without firing the cpal error callback),
+    // which otherwise deadlocks mixing (can_mix waits for mic data forever)
+    // while the UI keeps showing "recording".
+    last_mic_chunk: Mutex<Option<Instant>>,
+    last_system_chunk: Mutex<Option<Instant>>,
+    // Notified (once per stall episode) when a stream stops delivering chunks
+    stall_callback: Mutex<Option<Box<dyn Fn(DeviceType) + Send + Sync>>>,
 }
 
 impl RecordingState {
@@ -145,6 +155,9 @@ impl RecordingState {
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
+            last_mic_chunk: Mutex::new(None),
+            last_system_chunk: Mutex::new(None),
+            stall_callback: Mutex::new(None),
         })
     }
 
@@ -155,6 +168,9 @@ impl RecordingState {
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
         *self.last_error.lock().unwrap() = None;
+        // Reset stream heartbeats - first chunk per stream arms the watchdog
+        *self.last_mic_chunk.lock().unwrap() = None;
+        *self.last_system_chunk.lock().unwrap() = None;
         Ok(())
     }
 
@@ -263,6 +279,14 @@ impl RecordingState {
     }
 
     pub fn send_audio_chunk(&self, chunk: AudioChunk) -> Result<()> {
+        // Update stream heartbeat even while paused - the capture stream is
+        // still alive and delivering chunks (they are just discarded below)
+        let now = Instant::now();
+        match chunk.device_type {
+            DeviceType::Microphone => *self.last_mic_chunk.lock().unwrap() = Some(now),
+            DeviceType::System => *self.last_system_chunk.lock().unwrap() = Some(now),
+        }
+
         // Don't send audio chunks when paused
         if self.is_paused() {
             return Ok(()); // Silently discard chunks while paused
@@ -288,6 +312,33 @@ impl RecordingState {
         F: Fn(&AudioError) + Send + Sync + 'static,
     {
         *self.error_callback.lock().unwrap() = Some(Box::new(callback));
+    }
+
+    /// Register a callback notified when a capture stream stalls (stops
+    /// delivering chunks without raising a stream error).
+    pub fn set_stall_callback<F>(&self, callback: F)
+    where
+        F: Fn(DeviceType) + Send + Sync + 'static,
+    {
+        *self.stall_callback.lock().unwrap() = Some(Box::new(callback));
+    }
+
+    /// Notify listeners that a stream has stalled (called by the watchdog,
+    /// once per stall episode).
+    pub fn notify_stall(&self, device_type: DeviceType) {
+        if let Some(callback) = self.stall_callback.lock().unwrap().as_ref() {
+            callback(device_type);
+        }
+    }
+
+    /// Time since the last chunk from the given stream, or `None` if the
+    /// stream has not delivered any chunk yet this recording.
+    pub fn last_chunk_age(&self, device_type: &DeviceType) -> Option<std::time::Duration> {
+        let last = match device_type {
+            DeviceType::Microphone => *self.last_mic_chunk.lock().unwrap(),
+            DeviceType::System => *self.last_system_chunk.lock().unwrap(),
+        };
+        last.map(|t| t.elapsed())
     }
 
     pub fn report_error(&self, error: AudioError) {
@@ -433,6 +484,9 @@ impl Default for RecordingState {
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
+            last_mic_chunk: Mutex::new(None),
+            last_system_chunk: Mutex::new(None),
+            stall_callback: Mutex::new(None),
         }
     }
 }

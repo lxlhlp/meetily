@@ -1,9 +1,34 @@
 #[cfg(target_os = "windows")]
 use std::ptr;
-#[cfg(target_os = "windows")]
-use env_logger;
 #[cfg(target_os = "macos")]
 use std::process::Command;
+
+/// Open the folder containing the app's log files (meetily.log) in the
+/// system file manager. Works in packaged builds - this is the primary
+/// way for end users to retrieve logs for troubleshooting.
+#[tauri::command]
+pub fn open_logs_folder<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    use tauri::Manager;
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("Failed to resolve log dir: {}", e))?;
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log dir: {}", e))?;
+
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(target_os = "linux")]
+    let opener = "xdg-open";
+
+    std::process::Command::new(opener)
+        .arg(&log_dir)
+        .spawn()
+        .map_err(|e| format!("Failed to open log dir: {}", e))?;
+
+    Ok(log_dir.to_string_lossy().to_string())
+}
 
 #[cfg(target_os = "windows")]
 #[link(name = "kernel32")]
@@ -30,9 +55,8 @@ pub fn show_console() -> Result<String, String> {
             if AllocConsole() == 0 {
                 return Err("Failed to allocate console".to_string());
             }
-            // Reinitialize stdout, stdin, stderr for the new console
-            std::env::set_var("RUST_LOG", "info");
-            env_logger::init();
+            // Logger is already initialized by tauri-plugin-log in lib.rs;
+            // its Stdout target writes into the newly allocated console.
         } else {
             // Show existing console window
             ShowWindow(console_window, SW_SHOW);

@@ -3,14 +3,14 @@
     windows_subsystem = "windows"
 )]
 
-use log;
-use env_logger;
-
 fn main() {
-    std::env::set_var("RUST_LOG", "info");
-    env_logger::init();
+    // RUST_LOG is read by tauri-plugin-log (registered in lib.rs), which
+    // writes to both stdout and a rotating log file under the app log dir.
+    // env_logger is no longer used - it cannot write to files.
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
 
     // Async logger will be initialized lazily when first needed (after Tauri runtime starts)
-    log::info!("Starting application...");
     app_lib::run();
 }

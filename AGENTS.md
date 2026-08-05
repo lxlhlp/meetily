@@ -40,7 +40,8 @@ cargo test --manifest-path frontend/src-tauri/Cargo.toml --lib moss
 - `frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin` 必须存在否则 build script 失败（目录已 gitignore；`cargo check` 放个 shell 占位脚本即可，真打包要用 `llama-helper/` 编译出来的二进制）
 - 腾讯 npm 镜像缺部分版本（`@tiptap/*`）；用 `npm install --registry=https://registry.npmjs.org`
 - dev 出现 ChunkLoadError/白屏 = `.next` 或 WKWebView 缓存过期 → `npm run dev:clean`
-- Rust 日志：`main.rs` 用 env_logger，默认级别下 info 不可见 → 开发时必带 `RUST_LOG=info`
+- Rust 日志：已切到 `tauri-plugin-log`（lib.rs 注册，替换原 env_logger）。dev 输出 stdout + 文件；打包版只写文件：macOS `~/Library/Logs/com.meetily.ai/meetily.log`、Windows `%APPDATA%\com.meetily.ai\logs\meetily.log`（10MB 轮转）。级别读 `RUST_LOG`（缺省 info）。设置页有「打开日志目录」按钮（`open_logs_folder` 命令）
+- **dev 录音的麦克风权限**：必须从 Terminal.app / iTerm / VS Code 终端跑 `npm run tauri dev`。`tauri dev` 是裸二进制（无 CFBundleIdentifier），TCC 把麦克风权限归因到父终端 App——终端类 App 声明了 `NSMicrophoneUsageDescription` 可正常弹窗授权（授权一次终身有效，二进制重建不影响）；从 ZCode/其他未声明该 key 的宿主启动则**静默喂全零音频**（录音文件 -91dB 纯静音、无报错、无弹窗，`trigger_audio_permission` 自检是假阳性不可信）。症状鉴别：录音文件 volumedetect max=-91dB = 权限静默拒绝
 
 ## 打包（fork 上的 GitHub Actions）
 

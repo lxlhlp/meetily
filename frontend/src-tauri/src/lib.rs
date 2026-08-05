@@ -388,9 +388,37 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
-    log::set_max_level(log::LevelFilter::Info);
+    let log_level: log::LevelFilter = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(log::LevelFilter::Info);
 
-    let mut builder = tauri::Builder::default();
+    // Stdout only makes sense for dev runs launched from a terminal;
+    // packaged apps (especially Windows GUI subsystem) have no console.
+    // The LogDir target works in both dev and packaged builds.
+    #[cfg(debug_assertions)]
+    let log_targets = [
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+            file_name: Some("meetily".to_string()),
+        }),
+    ];
+    #[cfg(not(debug_assertions))]
+    let log_targets = [tauri_plugin_log::Target::new(
+        tauri_plugin_log::TargetKind::LogDir {
+            file_name: Some("meetily".to_string()),
+        },
+    )];
+
+    let mut builder = tauri::Builder::default().plugin(
+        tauri_plugin_log::Builder::new()
+            .level(log_level)
+            .targets(log_targets)
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+            .max_file_size(10 * 1024 * 1024) // 10MB per file before rotating
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+            .build(),
+    );
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
@@ -623,6 +651,7 @@ pub fn run() {
             console_utils::show_console,
             console_utils::hide_console,
             console_utils::toggle_console,
+            console_utils::open_logs_folder,
             ollama::get_ollama_models,
             ollama::pull_ollama_model,
             ollama::delete_ollama_model,

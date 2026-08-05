@@ -232,6 +232,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    // Notify frontend when a capture stream stalls silently (no chunks, no error)
+    let app_for_stall = app.clone();
+    manager.set_stall_callback(move |device_type| {
+        let _ = app_for_stall.emit("recording-stalled", format!("{:?}", device_type));
+    });
+
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
         .start_recording(microphone_device, system_device, auto_save)
@@ -401,6 +407,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let app_for_error = app.clone();
     manager.set_error_callback(move |error| {
         let _ = app_for_error.emit("recording-error", error.user_message());
+    });
+
+    // Notify frontend when a capture stream stalls silently (no chunks, no error)
+    let app_for_stall = app.clone();
+    manager.set_stall_callback(move |device_type| {
+        let _ = app_for_stall.emit("recording-stalled", format!("{:?}", device_type));
     });
 
     // Start recording with specified devices and auto_save setting
