@@ -1256,6 +1256,7 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
     max_tokens: Option<i32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    enable_thinking: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
         "api_save_custom_openai_config called: endpoint='{}', model='{}'",
@@ -1300,6 +1301,7 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
         max_tokens,
         temperature,
         top_p,
+        enable_thinking,
     };
 
     let pool = state.db_manager.pool();

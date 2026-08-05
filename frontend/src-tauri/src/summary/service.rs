@@ -69,6 +69,7 @@ struct SummaryCacheSource {
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    enable_thinking: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,6 +105,7 @@ fn build_summary_cache_source(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    enable_thinking: Option<bool>,
 ) -> SummaryCacheSource {
     SummaryCacheSource {
         transcript_fingerprint: stable_text_fingerprint(text),
@@ -118,6 +120,7 @@ fn build_summary_cache_source(
         max_tokens,
         temperature,
         top_p,
+        enable_thinking,
     }
 }
 
@@ -366,7 +369,7 @@ impl SummaryService {
         };
 
         // Get CustomOpenAI config if provider is CustomOpenAI
-        let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p) =
+        let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p, custom_openai_enable_thinking) =
             if provider == LLMProvider::CustomOpenAI {
                 match SettingsRepository::get_custom_openai_config(&pool).await {
                     Ok(Some(config)) => {
@@ -377,6 +380,7 @@ impl SummaryService {
                             config.max_tokens.map(|t| t as u32),
                             config.temperature,
                             config.top_p,
+                            config.enable_thinking,
                         )
                     }
                     Ok(None) => {
@@ -393,6 +397,7 @@ impl SummaryService {
                             config.max_tokens.map(|t| t as u32),
                             config.temperature,
                             config.top_p,
+                            config.enable_thinking,
                         )
                     }
                     Err(e) => {
@@ -402,7 +407,7 @@ impl SummaryService {
                     }
                 }
             } else {
-                (None, None, None, None, None)
+                (None, None, None, None, None, None)
             };
 
         // For CustomOpenAI, use its API key (if any) instead of the empty string
@@ -497,6 +502,7 @@ impl SummaryService {
             custom_openai_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
+            custom_openai_enable_thinking,
         );
 
         let cached_english = match SummaryProcessesRepository::get_summary_data(&pool, &meeting_id).await {
@@ -578,6 +584,7 @@ impl SummaryService {
             custom_openai_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
+            custom_openai_enable_thinking,
             app_data_dir.as_ref(),
             Some(&cancellation_token),
             summary_language.as_deref(),
@@ -776,6 +783,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -911,6 +919,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             ),
             build_summary_cache_source(
                 "transcript body",
@@ -921,6 +930,7 @@ mod tests {
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
+                None,
                 None,
                 None,
                 None,
@@ -939,6 +949,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             ),
             build_summary_cache_source(
                 "transcript body",
@@ -949,6 +960,7 @@ mod tests {
                 "openai",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
+                None,
                 None,
                 None,
                 None,
@@ -967,6 +979,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             ),
             build_summary_cache_source(
                 "transcript body",
@@ -977,6 +990,7 @@ mod tests {
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11500"),
+                None,
                 None,
                 None,
                 None,
@@ -995,6 +1009,7 @@ mod tests {
                 Some(2048),
                 Some(0.2),
                 Some(0.9),
+                Some(false),
             ),
         ];
 

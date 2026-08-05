@@ -28,6 +28,11 @@ pub struct CustomOpenAIConfig {
     /// Top-P sampling parameter (0.0-1.0, optional)
     #[serde(rename = "topP")]
     pub top_p: Option<f32>,
+    /// Whether to enable the model's reasoning/thinking mode (Qwen via vLLM:
+    /// `chat_template_kwargs.enable_thinking`). `None` (older configs) is
+    /// treated as enabled, matching the Qwen server-side default.
+    #[serde(rename = "enableThinking", default)]
+    pub enable_thinking: Option<bool>,
 }
 
 impl CustomOpenAIConfig {
@@ -45,6 +50,7 @@ impl CustomOpenAIConfig {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            enable_thinking: Some(true),
         }
     }
 }

@@ -25,6 +25,7 @@ export interface ModelConfig {
   maxTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
+  enableThinking?: boolean | null;
 }
 
 export interface CustomOpenAIConfig {
@@ -34,6 +35,7 @@ export interface CustomOpenAIConfig {
   maxTokens: number | null;
   temperature: number | null;
   topP: number | null;
+  enableThinking: boolean | null;
 }
 
 export interface RecordingPreferences {
@@ -91,6 +93,7 @@ export class ConfigService {
       maxTokens: config.maxTokens,
       temperature: config.temperature,
       topP: config.topP,
+      enableThinking: config.enableThinking,
     });
   }
 

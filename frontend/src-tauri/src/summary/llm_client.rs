@@ -25,6 +25,15 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
+}
+
+/// vLLM/Qwen chat template switches (verified against vLLM 0.23.1 + Qwen3.6:
+/// `enable_thinking: false` disables reasoning output; server default is on)
+#[derive(Debug, Serialize)]
+pub struct ChatTemplateKwargs {
+    pub enable_thinking: bool,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -122,6 +131,7 @@ pub async fn generate_summary(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    enable_thinking: Option<bool>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
@@ -219,11 +229,17 @@ pub async fn generate_summary(
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
         // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
+        let (max_tokens_val, temperature_val, top_p_val, chat_template_kwargs) =
+            if provider == &LLMProvider::CustomOpenAI {
+                (
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    enable_thinking.map(|v| ChatTemplateKwargs { enable_thinking: v }),
+                )
+            } else {
+                (None, None, None, None)
+            };
 
         serde_json::json!(ChatRequest {
             model: model_name.to_string(),
@@ -240,6 +256,7 @@ pub async fn generate_summary(
             max_tokens: max_tokens_val,
             temperature: temperature_val,
             top_p: top_p_val,
+            chat_template_kwargs,
         })
     } else {
         serde_json::json!(ClaudeRequest {
@@ -350,6 +367,7 @@ pub async fn generate_summary_stream(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    enable_thinking: Option<bool>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     on_chunk: &mut (dyn FnMut(&str, bool) + Send),
@@ -442,12 +460,18 @@ pub async fn generate_summary_stream(
     );
 
     let request_body = if provider != &LLMProvider::Claude {
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-        serde_json::json!({
+        let (max_tokens_val, temperature_val, top_p_val, chat_template_kwargs) =
+            if provider == &LLMProvider::CustomOpenAI {
+                (
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    enable_thinking.map(|v| serde_json::json!({ "enable_thinking": v })),
+                )
+            } else {
+                (None, None, None, None)
+            };
+        let mut body = serde_json::json!({
             "model": model_name.to_string(),
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -457,7 +481,11 @@ pub async fn generate_summary_stream(
             "temperature": temperature_val,
             "top_p": top_p_val,
             "stream": true,
-        })
+        });
+        if let Some(kwargs) = chat_template_kwargs {
+            body["chat_template_kwargs"] = kwargs;
+        }
+        body
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),

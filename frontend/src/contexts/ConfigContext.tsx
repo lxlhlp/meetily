@@ -252,6 +252,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   maxTokens: customConfig.maxTokens,
                   temperature: customConfig.temperature,
                   topP: customConfig.topP,
+                  enableThinking: customConfig.enableThinking,
                 }));
 
                 // Seed per-provider model cache from DB
