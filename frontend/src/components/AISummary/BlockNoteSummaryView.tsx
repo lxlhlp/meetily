@@ -8,6 +8,7 @@ import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
+import { useI18n } from '@/i18n';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -81,6 +82,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   streamingContent = '',
   streamingReasoning = '',
 }, ref) => {
+  const { t } = useI18n();
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
@@ -165,11 +167,11 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
+      alert(t('aiSummary.saveChangesFailed'));
     } finally {
       setIsSaving(false);
     }
-  }, [onSave, isDirty, currentBlocks, editor]);
+  }, [onSave, isDirty, currentBlocks, editor, t]);
 
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
@@ -235,7 +237,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         {streamingReasoning && (
           <details className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
             <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-900">
-              Thinking process ({streamingReasoning.length} chars)
+              {t('status.thinkingProcess', { chars: streamingReasoning.length })}
             </summary>
             <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-gray-500">
               {streamingReasoning}

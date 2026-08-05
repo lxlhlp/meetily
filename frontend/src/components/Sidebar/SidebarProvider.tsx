@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useI18n } from '@/i18n';
 
 
 interface SidebarItem {
@@ -65,7 +66,8 @@ export const useSidebar = () => {
 };
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
+  const { t } = useI18n();
+  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: t('sidebar.newCall') });
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
@@ -132,10 +134,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Update current meeting when on home page
   useEffect(() => {
     if (pathname === '/') {
-      setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
+      setCurrentMeeting({ id: 'intro-call', title: t('sidebar.newCall') });
     }
     setSidebarItems(baseItems);
-  }, [pathname]);
+  }, [pathname, t]);
 
   // Update sidebar items when meetings change
   useEffect(() => {
@@ -214,7 +216,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         });
         onUpdate({
           status: 'error',
-          error: 'Summary generation timed out after 15 minutes. Please try again or check your model configuration.'
+          error: t('sidebar.summaryTimedOut')
         });
         return;
       }
@@ -264,7 +266,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }, 5000); // Poll every 5 seconds
 
     setActiveSummaryPolls(prev => new Map(prev).set(meetingId, pollInterval));
-  }, [activeSummaryPolls]);
+  }, [activeSummaryPolls, t]);
 
   const stopSummaryPolling = React.useCallback((meetingId: string) => {
     const pollInterval = activeSummaryPolls.get(meetingId);

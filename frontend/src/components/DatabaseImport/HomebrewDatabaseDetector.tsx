@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
 import { Database, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
 interface HomebrewDatabaseDetectorProps {
@@ -17,6 +18,7 @@ const HOMEBREW_PATHS = [
 ];
 
 export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: HomebrewDatabaseDetectorProps) {
+  const { t } = useI18n();
   const [isChecking, setIsChecking] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [homebrewDbExists, setHomebrewDbExists] = useState(false);
@@ -61,7 +63,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
         legacyDbPath: detectedPath,
       });
 
-      toast.success('Database imported successfully! Reloading...');
+      toast.success(t('database.imported'));
 
       // Wait 1 second for user to see success, then reload window to refresh all data
       setTimeout(() => {
@@ -69,7 +71,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
       }, 1000);
     } catch (error) {
       console.error('Error importing database:', error);
-      toast.error(`Import failed: ${error}`);
+      toast.error(t('database.importFailed', { error: String(error) }));
       setIsImporting(false);
     }
   };

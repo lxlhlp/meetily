@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
 import { Transcript, TranscriptUpdate } from '@/types';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
@@ -25,8 +26,9 @@ interface TranscriptContextType {
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [meetingTitle, setMeetingTitle] = useState('+ New Call');
+  const [meetingTitle, setMeetingTitle] = useState(t('sidebar.newCall'));
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
   // Recording state context - provides backend-synced state
@@ -338,7 +340,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        alert(t('transcript.listenerSetupFailed'));
       }
     };
 
@@ -356,7 +358,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
     };
-  }, [currentMeetingId]); // Add currentMeetingId dependency
+  }, [currentMeetingId, t]); // Add currentMeetingId dependency
 
   // Sync transcript history and meeting name from backend on reload
   // This fixes the issue where reloading during active recording causes state desync
@@ -469,8 +471,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 
-    toast.success("Transcript copied to clipboard");
-  }, [transcripts]);
+    toast.success(t('transcript.copied'));
+  }, [transcripts, t]);
 
   // Force flush buffer (for final transcript processing)
   const flushBuffer = useCallback(() => {

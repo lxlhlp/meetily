@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
+import { useI18n } from '@/i18n';
 import { toast } from 'sonner';
 
 interface AudioRecoveryStatus {
@@ -31,6 +32,7 @@ export interface UseTranscriptRecoveryReturn {
 }
 
 export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
+  const { t } = useI18n();
   const [recoverableMeetings, setRecoverableMeetings] = useState<MeetingMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
@@ -188,8 +190,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);
-        toast.warning('Could not apply default summary language', {
-          description: 'The recovered meeting was saved, but the default summary language was not applied.',
+        toast.warning(t('home.summaryLangApplyFailed'), {
+          description: t('home.summaryLangApplyFailedDesc'),
         });
       }
 

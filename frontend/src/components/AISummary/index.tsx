@@ -5,6 +5,7 @@ import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
 import { ExclamationTriangleIcon, CheckCircleIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+import { useI18n } from '@/i18n';
 
 interface Props {
   summary: Summary | null;
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerateSummary, meeting }: Props) => {
+  const { t } = useI18n();
   const generateUniqueId = (sectionKey: string) => {
     return `${sectionKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
@@ -53,14 +55,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   const currentSummary = useMemo(() => {
     if (!summary) {
       return {
-        Agenda: { title: "Agenda", blocks: [] },
-        Decisions: { title: "Decisions", blocks: [] },
-        ActionItems: { title: "Action Items", blocks: [] },
-        ClosingRemarks: { title: "Closing Remarks", blocks: [] }
+        Agenda: { title: t('aiSummary.agenda'), blocks: [] },
+        Decisions: { title: t('meeting.decisions'), blocks: [] },
+        ActionItems: { title: t('meeting.actionItems'), blocks: [] },
+        ClosingRemarks: { title: t('aiSummary.closingRemarks'), blocks: [] }
       };
     }
     return ensureUniqueBlockIds(summary);
-  }, [summary]);
+  }, [summary, t]);
 
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [lastSelectedBlock, setLastSelectedBlock] = useState<string | null>(null);
@@ -541,7 +543,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     const newSummary: Summary = {
       ...currentSummary,
       [newSectionKey]: {
-        title: 'New Section',
+        title: t('aiSummary.newSection'),
         blocks: [{
           id: newBlockId,
           type: 'text' as const,
@@ -609,10 +611,10 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     <div className="w-full p-4 bg-red-50 border border-red-200 rounded-lg">
       <div className="flex items-center mb-2">
         <ExclamationTriangleIcon className="h-5 w-5 text-red-500 mr-2" />
-        <h3 className="text-red-700 font-medium">Error Generating Summary</h3>
+        <h3 className="text-red-700 font-medium">{t('summary.errorGenerating')}</h3>
       </div>
       <p className="text-red-600 text-sm">{error}</p>
-      <p className="text-red-500 text-xs mt-2">Please check your model configuration and API keys, or try again.</p>
+      <p className="text-red-500 text-xs mt-2">{t('aiSummary.checkModelConfig')}</p>
     </div>
   );
 
@@ -622,12 +624,12 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
         <div>
           <h3 className="text-blue-700 font-medium">
-            {status === 'processing' ? 'Processing Transcript' : 'Generating Summary'}
+            {t(status === 'processing' ? 'summary.processingTranscript' : 'summary.generatingSummary')}
           </h3>
           <p className="text-blue-600 text-sm">
             {status === 'processing' 
-              ? 'Analyzing your transcript...' 
-              : 'Creating a detailed summary of your meeting...'}
+              ? t('aiSummary.analyzingTranscript') 
+              : t('aiSummary.creatingDetailedSummary')}
           </p>
         </div>
       </div>
@@ -649,8 +651,8 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   if (!hasContent && status === 'completed') {
     return (
       <div className="w-full p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
-        <p className="text-gray-600">No summary content available.</p>
-        <p className="text-gray-500 text-sm mt-1">Try generating a new summary.</p>
+        <p className="text-gray-600">{t('aiSummary.noContentAvailable')}</p>
+        <p className="text-gray-500 text-sm mt-1">{t('aiSummary.tryGenerateNew')}</p>
       </div>
     );
   }
@@ -685,14 +687,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleCopyBlocks}
           >
             <span className="text-gray-600">📋</span>
-            <span>Copy {selectedBlocks.length > 1 ? `${selectedBlocks.length} blocks` : 'block'}</span>
+            <span>{t('aiSummary.copyBlocks', { count: selectedBlocks.length })}</span>
           </button>
           <button
             className="w-full px-4 py-2 text-left hover:bg-gray-100 text-red-600 flex items-center space-x-2"
             onClick={handleDeleteBlocks}
           >
             <span>🗑️</span>
-            <span>Delete {selectedBlocks.length > 1 ? `${selectedBlocks.length} blocks` : 'block'}</span>
+            <span>{t('aiSummary.deleteBlocks', { count: selectedBlocks.length })}</span>
           </button>
         </div>
       )}

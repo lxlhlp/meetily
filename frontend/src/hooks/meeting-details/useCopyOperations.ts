@@ -2,6 +2,7 @@ import { useCallback, RefObject } from 'react';
 import { Transcript, Summary } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 
@@ -20,6 +21,7 @@ export function useCopyOperations({
   aiSummary,
   blockNoteSummaryRef,
 }: UseCopyOperationsProps) {
+  const { t } = useI18n();
 
   // Helper function to fetch ALL transcripts for copying (not just paginated data)
   const fetchAllTranscripts = useCallback(async (meetingId: string): Promise<Transcript[]> => {
@@ -51,10 +53,10 @@ export function useCopyOperations({
       return allData.transcripts;
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
-      toast.error('Failed to fetch transcripts for copying');
+      toast.error(t('transcript.fetchFailed'));
       return [];
     }
-  }, []);
+  }, [t]);
 
   // Copy transcript to clipboard
   const handleCopyTranscript = useCallback(async () => {
@@ -63,7 +65,7 @@ export function useCopyOperations({
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
-      const error_msg = 'No transcripts available to copy';
+      const error_msg = t('transcript.noContent');
       console.log(error_msg);
       toast.error(error_msg);
       return;
@@ -90,7 +92,7 @@ export function useCopyOperations({
       .join('\n');
 
     await navigator.clipboard.writeText(header + date + fullTranscript);
-    toast.success("Transcript copied to clipboard");
+    toast.success(t('transcript.copied'));
 
     // Track copy analytics
     const wordCount = allTranscripts
@@ -102,7 +104,7 @@ export function useCopyOperations({
       transcript_length: allTranscripts.length.toString(),
       word_count: wordCount.toString()
     });
-  }, [meeting, meetingTitle, fetchAllTranscripts]);
+  }, [meeting, meetingTitle, fetchAllTranscripts, t]);
 
   // Copy summary to clipboard
   const handleCopySummary = useCallback(async () => {
@@ -152,7 +154,7 @@ export function useCopyOperations({
       // If still no summary content, show message
       if (!summaryMarkdown.trim()) {
         console.error('❌ No summary content available to copy');
-        toast.error('No summary content available to copy');
+        toast.error(t('summary.noContentToCopy'));
         return;
       }
 
@@ -176,7 +178,7 @@ export function useCopyOperations({
       await navigator.clipboard.writeText(fullMarkdown);
 
       console.log('✅ Successfully copied to clipboard!');
-      toast.success("Summary copied to clipboard");
+      toast.success(t('summary.copied'));
 
       // Track copy analytics
       await Analytics.trackCopy('summary', {
@@ -185,9 +187,9 @@ export function useCopyOperations({
       });
     } catch (error) {
       console.error('❌ Failed to copy summary:', error);
-      toast.error("Failed to copy summary");
+      toast.error(t('summary.copyFailed'));
     }
-  }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
+  }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef, t]);
 
   return {
     handleCopyTranscript,

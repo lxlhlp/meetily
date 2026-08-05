@@ -10,14 +10,8 @@ interface QuickPrompt {
   text: string;
 }
 
-/// Built-in quick prompts for common summary-context needs.
-const PRESET_PROMPTS: QuickPrompt[] = [
-  { label: '关注行动项', text: '请重点提取行动项，明确每项任务的负责人和截止时间。' },
-  { label: '区分决策与讨论', text: '请明确区分已拍板的决策和仍在讨论中的提议，不要把讨论中的想法写成结论。' },
-  { label: '参会人', text: '参会人包括：' },
-  { label: '会议背景', text: '会议背景与目标：' },
-  { label: '保留原文依据', text: '每个结论都需要附上转写原文片段作为依据。' },
-];
+/// Built-in quick prompts are defined inside the component so labels/texts
+/// can be translated via t() (see presetPrompts below).
 
 const STORAGE_KEY = 'quick-prompt-chips';
 
@@ -34,6 +28,14 @@ interface QuickPromptChipsProps {
  */
 export function QuickPromptChips({ currentValue, onInsert }: QuickPromptChipsProps) {
   const { t } = useI18n();
+  // Built-in quick prompts for common summary-context needs.
+  const presetPrompts: QuickPrompt[] = [
+    { label: t('meeting.quickPromptActionItems'), text: t('meeting.quickPromptActionItemsText') },
+    { label: t('meeting.quickPromptDecisions'), text: t('meeting.quickPromptDecisionsText') },
+    { label: t('meeting.quickPromptAttendees'), text: t('meeting.quickPromptAttendeesText') },
+    { label: t('meeting.quickPromptBackground'), text: t('meeting.quickPromptBackgroundText') },
+    { label: t('meeting.quickPromptEvidence'), text: t('meeting.quickPromptEvidenceText') },
+  ];
   const [userPrompts, setUserPrompts] = useState<QuickPrompt[]>([]);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export function QuickPromptChips({ currentValue, onInsert }: QuickPromptChipsPro
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
-      {PRESET_PROMPTS.map((p) => (
+      {presetPrompts.map((p) => (
         <button
           key={p.label}
           type="button"

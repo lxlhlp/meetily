@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from 'lucide-react';
 import { HomebrewDatabaseDetector } from './HomebrewDatabaseDetector';
@@ -15,6 +16,7 @@ interface LegacyDatabaseImportProps {
 type ImportState = 'idle' | 'selecting' | 'detecting' | 'importing' | 'success' | 'error';
 
 export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImportProps) {
+  const { t } = useI18n();
   const [importState, setImportState] = useState<ImportState>('idle');
   const [detectedPath, setDetectedPath] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -66,7 +68,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       });
 
       setImportState('success');
-      toast.success('Database imported successfully! Reloading...');
+      toast.success(t('database.imported'));
 
       // Wait 1 second for user to see success, then reload window to refresh all data
       setTimeout(() => {
@@ -76,7 +78,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       console.error('Error importing database:', error);
       setErrorMessage(String(error));
       setImportState('error');
-      toast.error(`Import failed: ${error}`);
+      toast.error(t('database.importFailed', { error: String(error) }));
       setTimeout(() => setImportState('idle'), 3000);
     }
   };
@@ -88,7 +90,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       await invoke('initialize_fresh_database');
 
       setImportState('success');
-      toast.success('Database initialized successfully! Starting app...');
+      toast.success(t('database.initialized'));
 
       // Wait 1 second for user to see success, then reload window to start fresh
       setTimeout(() => {

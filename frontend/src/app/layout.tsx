@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { I18nProvider } from '@/i18n'
+import { I18nProvider, useI18n } from '@/i18n'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
@@ -64,45 +64,30 @@ function ConditionalImportDialog({
 
 // export { metadata } from './metadata'
 
-export default function RootLayout({
-  children,
+// ToastBridge — rendered inside I18nProvider so it can use useI18n() for toast
+// copy. Renders nothing; it only wires up the global event listeners whose
+// handlers show toasts.
+function ToastBridge({
+  showOnboarding,
+  setShowDropOverlay,
+  setImportFilePath,
+  setShowImportDialog,
 }: {
-  children: React.ReactNode
+  showOnboarding: boolean;
+  setShowDropOverlay: (show: boolean) => void;
+  setImportFilePath: (path: string | null) => void;
+  setShowImportDialog: (open: boolean) => void;
 }) {
-  // Onboarding flow is disabled for this internal build (cloud providers
-  // are pre-configured). Kept as a constant so the flow can be re-enabled.
-  const [showOnboarding] = useState(false)
-  const [, setOnboardingCompleted] = useState(false)
+  const { t } = useI18n();
 
-  // Import audio state
-  const [showDropOverlay, setShowDropOverlay] = useState(false)
-  const [showImportDialog, setShowImportDialog] = useState(false)
-  const [importFilePath, setImportFilePath] = useState<string | null>(null)
-
+  // Listen for tray recording toggle request
   useEffect(() => {
-    // Onboarding flow is disabled for this internal build: cloud providers
-    // (MOSS / Qwen) are pre-configured, so there is nothing to set up.
-    // Fresh databases are still initialized with cloud-first defaults via
-    // initialize_fresh_database (OnboardingContext).
-    setOnboardingCompleted(true)
-  }, [])
-
-  // Disable context menu in production
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'production') {
-      const handleContextMenu = (e: MouseEvent) => e.preventDefault();
-      document.addEventListener('contextmenu', handleContextMenu);
-      return () => document.removeEventListener('contextmenu', handleContextMenu);
-    }
-  }, []);
-  useEffect(() => {
-    // Listen for tray recording toggle request
     const unlisten = listen('request-recording-toggle', () => {
       console.log('[Layout] Received request-recording-toggle from tray');
 
       if (showOnboarding) {
-        toast.error("Please complete setup first", {
-          description: "You need to finish onboarding before you can start recording."
+        toast.error(t('onboarding.completeSetupFirst'), {
+          description: t('onboarding.completeSetupFirstDesc')
         });
       } else {
         // If in main app, forward to useRecordingStart via window event
@@ -114,7 +99,7 @@ export default function RootLayout({
     return () => {
       unlisten.then(fn => fn());
     };
-  }, [showOnboarding]);
+  }, [showOnboarding, t]);
 
   // Handle file drop for audio import
   const handleFileDrop = useCallback((paths: string[]) => {
@@ -122,8 +107,8 @@ export default function RootLayout({
     const betaFeatures = loadBetaFeatures();
 
     if (!betaFeatures.importAndRetranscribe) {
-      toast.error('Beta feature disabled', {
-        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+      toast.error(t('onboarding.betaDisabled'), {
+        description: t('onboarding.betaDisabledDesc')
       });
       return;
     }
@@ -139,11 +124,11 @@ export default function RootLayout({
       setImportFilePath(audioFile);
       setShowImportDialog(true);
     } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', {
-        description: `Supported formats: ${getAudioFormatsDisplayList()}`
+      toast.error(t('importAudio.dropAudioFile'), {
+        description: t('importAudio.supportedFormats', { formats: getAudioFormatsDisplayList() })
       });
     }
-  }, []);
+  }, [setImportFilePath, setShowImportDialog, t]);
 
   // Listen for drag-drop events
   useEffect(() => {
@@ -195,7 +180,42 @@ export default function RootLayout({
       cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [showOnboarding, handleFileDrop]);
+  }, [showOnboarding, handleFileDrop, setShowDropOverlay]);
+
+  return null;
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  // Onboarding flow is disabled for this internal build (cloud providers
+  // are pre-configured). Kept as a constant so the flow can be re-enabled.
+  const [showOnboarding] = useState(false)
+  const [, setOnboardingCompleted] = useState(false)
+
+  // Import audio state
+  const [showDropOverlay, setShowDropOverlay] = useState(false)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importFilePath, setImportFilePath] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Onboarding flow is disabled for this internal build: cloud providers
+    // (MOSS / Qwen) are pre-configured, so there is nothing to set up.
+    // Fresh databases are still initialized with cloud-first defaults via
+    // initialize_fresh_database (OnboardingContext).
+    setOnboardingCompleted(true)
+  }, [])
+
+  // Disable context menu in production
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') {
+      const handleContextMenu = (e: MouseEvent) => e.preventDefault();
+      document.addEventListener('contextmenu', handleContextMenu);
+      return () => document.removeEventListener('contextmenu', handleContextMenu);
+    }
+  }, []);
 
   // Handle import dialog close
   const handleImportDialogClose = useCallback((open: boolean) => {
@@ -263,10 +283,16 @@ export default function RootLayout({
               </ConfigProvider>
             </TranscriptProvider>
           </RecordingStateProvider>
+          <ToastBridge
+            showOnboarding={showOnboarding}
+            setShowDropOverlay={setShowDropOverlay}
+            setImportFilePath={setImportFilePath}
+            setShowImportDialog={setShowImportDialog}
+          />
+          <Toaster position="bottom-center" richColors closeButton />
           </I18nProvider>
         </AnalyticsProvider>
 
-        <Toaster position="bottom-center" richColors closeButton />
       </body>
     </html>
   )

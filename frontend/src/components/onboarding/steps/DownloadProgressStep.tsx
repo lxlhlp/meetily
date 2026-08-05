@@ -7,6 +7,7 @@ import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useI18n } from '@/i18n';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
@@ -23,6 +24,7 @@ interface DownloadState {
 }
 
 export function DownloadProgressStep() {
+  const { t } = useI18n();
   const {
     goNext,
     selectedSummaryModel,
@@ -100,8 +102,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Download retry failed', {
-        description: 'Please check your connection and try again.',
+      toast.error(t('onboarding.downloadRetryFailed'), {
+        description: t('onboarding.downloadRetryFailedDesc'),
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -148,8 +150,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Summary model download retry failed', {
-        description: 'Please check your connection and try again.',
+      toast.error(t('onboarding.summaryModelRetryFailed'), {
+        description: t('onboarding.downloadRetryFailedDesc'),
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -377,8 +379,8 @@ export function DownloadProgressStep() {
             progress: 100,
           }));
         } else if (!actuallyAvailable && parakeetState.status === 'error') {
-          toast.error('Transcription engine required', {
-            description: 'Please retry the download before continuing.',
+          toast.error(t('onboarding.engineRequired'), {
+            description: t('onboarding.engineRequiredDesc'),
           });
           return;
         }
@@ -393,8 +395,8 @@ export function DownloadProgressStep() {
 
     // Show toast if downloads still in progress
     if (!downloadsComplete) {
-      toast.info('Downloads will continue in the background', {
-        description: 'You can start using the app. Recording will be available once speech recognition is ready.',
+      toast.info(t('onboarding.downloadsContinueBackground'), {
+        description: t('onboarding.downloadsContinueBackgroundDesc'),
         duration: 5000,
       });
     }
@@ -414,8 +416,8 @@ export function DownloadProgressStep() {
         window.location.reload();
       } catch (error) {
         console.error('Failed to complete onboarding:', error);
-        toast.error('Failed to complete setup', {
-          description: 'Please try again.',
+        toast.error(t('onboarding.setupCompleteFailed'), {
+          description: t('onboarding.setupCompleteFailedDesc'),
         });
         setIsCompleting(false);
       }
@@ -442,7 +444,7 @@ export function DownloadProgressStep() {
         </div>
         <div>
           {state.status === 'waiting' && (
-            <span className="text-sm text-gray-500">Waiting...</span>
+            <span className="text-sm text-gray-500">{t('onboarding.waiting')}</span>
           )}
           {state.status === 'downloading' && (
             <Loader2 className="w-5 h-5 text-gray-700 animate-spin" />
@@ -453,7 +455,7 @@ export function DownloadProgressStep() {
             </div>
           )}
           {state.status === 'error' && (
-            <span className="text-sm text-red-500">Failed</span>
+            <span className="text-sm text-red-500">{t('onboarding.failed')}</span>
           )}
         </div>
       </div>
@@ -487,18 +489,18 @@ export function DownloadProgressStep() {
 
       {state.status === 'error' && state.error && (
         <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600 font-medium">Download Error</p>
+          <p className="text-sm text-red-600 font-medium">{t('onboarding.downloadError')}</p>
           <p className="text-xs text-red-500 mt-1">{state.error}</p>
-          {(title === 'Transcription Engine' || title === 'Summary Engine') && (
+          {(title === t('onboarding.transcriptionEngine') || title === t('onboarding.summaryEngine')) && (
             <button
-              onClick={title === 'Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
+              onClick={title === t('onboarding.transcriptionEngine') ? handleRetryDownload : handleRetrySummaryDownload}
               className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Try Again
+              {t('common.retry')}
             </button>
           )}
         </div>
@@ -508,8 +510,8 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
-      description="You can start using Meetily after downloading the Transcription Engine."
+      title={t('onboarding.downloadTitle')}
+      description={t('onboarding.downloadDesc')}
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -524,16 +526,16 @@ export function DownloadProgressStep() {
                     <Mic className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <h3 className="font-medium text-gray-900">Transcription Engine</h3>
-                    <p className="text-sm text-gray-500">云端 MOSS 服务（内网已配置）</p>
+                    <h3 className="font-medium text-gray-900">{t('onboarding.transcriptionEngine')}</h3>
+                    <p className="text-sm text-gray-500">{t('onboarding.cloudMossConfigured')}</p>
                   </div>
                 </div>
-                <span className="text-sm text-blue-600 font-medium">无需下载</span>
+                <span className="text-sm text-blue-600 font-medium">{t('onboarding.noDownloadNeeded')}</span>
               </div>
             </div>
           ) : (
             renderDownloadCard(
-              'Transcription Engine',
+              t('onboarding.transcriptionEngine'),
               <Mic className="w-5 h-5 text-gray-600" />,
               parakeetState,
               '~670 MB'
@@ -548,16 +550,16 @@ export function DownloadProgressStep() {
                     <Sparkles className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <h3 className="font-medium text-gray-900">Summary Engine</h3>
-                    <p className="text-sm text-gray-500">云端 Qwen3.6-27B（内网已配置）</p>
+                    <h3 className="font-medium text-gray-900">{t('onboarding.summaryEngine')}</h3>
+                    <p className="text-sm text-gray-500">{t('onboarding.cloudQwenConfigured')}</p>
                   </div>
                 </div>
-                <span className="text-sm text-blue-600 font-medium">无需下载</span>
+                <span className="text-sm text-blue-600 font-medium">{t('onboarding.noDownloadNeeded')}</span>
               </div>
             </div>
           ) : (
             renderDownloadCard(
-              'Summary Engine',
+              t('onboarding.summaryEngine'),
               <Sparkles className="w-5 h-5 text-gray-600" />,
               summaryState,
               getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
@@ -579,9 +581,9 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">You can continue while this finishes</p>
+                  <p className="font-medium">{t('onboarding.continueWhileFinishes')}</p>
                   <p className="text-gray-700 mt-1">
-                    Download will continue in the background.
+                    {t('onboarding.downloadInBackground')}
                   </p>
                 </div>
               </div>
@@ -599,12 +601,12 @@ export function DownloadProgressStep() {
             {(isCompleting || (!parakeetDownloaded && !useCloudTranscription)) ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              'Continue'
+              t('onboarding.continue')
             )}
           </Button>
           {useCloudTranscription && !parakeetDownloaded && (
             <p className="text-xs text-gray-500 text-center mt-2">
-              已配置云端 MOSS 转写，无需下载本地模型；稍后在设置中也可随时下载离线引擎
+              {t('onboarding.cloudMossHint')}
             </p>
           )}
         </div>

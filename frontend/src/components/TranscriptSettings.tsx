@@ -121,12 +121,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                    <SelectValue placeholder="Select provider" />
+                                    <SelectValue placeholder={t('modelSettings.selectProvider')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
-                                    <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    <SelectItem value="moss">☁️ MOSS Server (Chinese meetings · Speaker labels)</SelectItem>
+                                    <SelectItem value="parakeet">{t('settings.parakeetOption')}</SelectItem>
+                                    <SelectItem value="localWhisper">{t('settings.whisperOption')}</SelectItem>
+                                    <SelectItem value="moss">{t('settings.mossOption')}</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -143,7 +143,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                        <SelectValue placeholder="Select model" />
+                                        <SelectValue placeholder={t('modelSettings.selectModel')} />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {modelOptions[uiProvider].map((model) => (
@@ -198,7 +198,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     {requiresApiKey && (
                         <div>
                             <Label className="block text-sm font-medium text-gray-700 mb-1">
-                                API Key
+                                {t('modelSettings.apiKey')}
                             </Label>
                             <div className="relative mx-1">
                                 <Input
@@ -209,7 +209,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     onChange={(e) => setApiKey(e.target.value)}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
-                                    placeholder="Enter your API key"
+                                    placeholder={t('modelSettings.enterApiKey')}
                                 />
                                 {isApiKeyLocked && (
                                     <div
@@ -225,7 +225,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
                                         className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''
                                             }`}
-                                        title={isApiKeyLocked ? "Unlock to edit" : "Lock to prevent editing"}
+                                        title={isApiKeyLocked ? t('modelSettings.unlockToEdit') : t('modelSettings.lockToPreventEditing')}
                                     >
                                         {isApiKeyLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
                                     </Button>
@@ -362,7 +362,7 @@ function MossServerSettings({ onSaved }: MossServerSettingsProps) {
                     type="password"
                     value={mossApiKey}
                     onChange={(e) => setMossApiKey(e.target.value)}
-                    placeholder="Leave empty if the server requires no auth"
+                    placeholder={t('modelSettings.leaveEmptyIfNotRequired')}
                     className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                 />
             </div>

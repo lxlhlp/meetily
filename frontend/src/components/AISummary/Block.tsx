@@ -1,7 +1,8 @@
 'use client';
 
 import { Block } from '@/types';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { useI18n } from '@/i18n';
 
 interface BlockProps {
   block: Block;
@@ -26,37 +27,6 @@ interface CommandOption {
   description: string;
 }
 
-const COMMANDS: CommandOption[] = [
-  { 
-    id: 'text', 
-    label: 'Text', 
-    type: 'text', 
-    icon: 'T', 
-    description: 'Just start writing with plain text' 
-  },
-  { 
-    id: 'bullet', 
-    label: 'Bullet List', 
-    type: 'bullet', 
-    icon: '•', 
-    description: 'Create a bulleted list' 
-  },
-  { 
-    id: 'h1', 
-    label: 'Heading 1', 
-    type: 'heading1', 
-    icon: 'H1', 
-    description: 'Big section heading' 
-  },
-  { 
-    id: 'h2', 
-    label: 'Heading 2', 
-    type: 'heading2', 
-    icon: 'H2', 
-    description: 'Medium section heading' 
-  },
-];
-
 export const BlockComponent: React.FC<BlockProps> = ({
   block,
   isSelected,
@@ -71,11 +41,43 @@ export const BlockComponent: React.FC<BlockProps> = ({
   onNavigate,
   onCreateNewBlock,
 }) => {
+  const { t } = useI18n();
   const [showCommands, setShowCommands] = useState(false);
   const [commandFilter, setCommandFilter] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const commandsRef = useRef<HTMLDivElement>(null);
+
+  const COMMANDS = useMemo<CommandOption[]>(() => [
+    {
+      id: 'text',
+      label: t('aiSummary.blockText'),
+      type: 'text',
+      icon: 'T',
+      description: t('aiSummary.commandText')
+    },
+    {
+      id: 'bullet',
+      label: t('aiSummary.blockBulletList'),
+      type: 'bullet',
+      icon: '•',
+      description: t('aiSummary.commandBullet')
+    },
+    {
+      id: 'h1',
+      label: t('aiSummary.blockHeading1'),
+      type: 'heading1',
+      icon: 'H1',
+      description: t('aiSummary.commandHeading1')
+    },
+    {
+      id: 'h2',
+      label: t('aiSummary.blockHeading2'),
+      type: 'heading2',
+      icon: 'H2',
+      description: t('aiSummary.commandHeading2')
+    },
+  ], [t]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -250,7 +252,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
             ${block.type === 'heading1' ? 'text-xl font-bold' : ''}
             ${block.type === 'heading2' ? 'text-lg font-semibold' : ''}
           `}
-          placeholder="Type '/' for commands..."
+          placeholder={t('aiSummary.typeSlashForCommands')}
         />
 
         {showCommands && (
