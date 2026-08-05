@@ -647,6 +647,8 @@ pub fn run() {
             api::api_get_meeting,
             api::api_get_meeting_metadata,
             api::api_get_meeting_transcripts,
+            api::api_get_meeting_audio,
+            api::api_get_transcript_offset_at,
             api::api_save_meeting_title,
             api::api_save_transcript,
             api::open_meeting_folder,

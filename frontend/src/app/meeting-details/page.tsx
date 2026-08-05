@@ -8,6 +8,7 @@ import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
+import { useI18n } from "@/i18n";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 
 interface MeetingDetailsResponse {
@@ -20,6 +21,7 @@ interface MeetingDetailsResponse {
 }
 
 function MeetingDetailsContent() {
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
@@ -29,7 +31,9 @@ function MeetingDetailsContent() {
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Summary loads asynchronously - it must NOT block the first paint of the
+  // transcript (it used to gate the whole page behind api_get_summary)
+  const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState<boolean>(false);
   const [hasCheckedAutoGen, setHasCheckedAutoGen] = useState<boolean>(false);
 
@@ -45,6 +49,7 @@ function MeetingDetailsContent() {
     loadedCount,
     loadMore,
     refetch,
+    jumpToOffset,
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
 
@@ -165,7 +170,6 @@ function MeetingDetailsContent() {
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
-    setIsLoading(true);
     // Reset auto-generation state to allow new meeting to be checked
     setHasCheckedAutoGen(false);
     setShouldAutoGenerate(false);
@@ -186,8 +190,8 @@ function MeetingDetailsContent() {
 
     if (!meetingId || meetingId === 'intro-call') {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
-      setError("No meeting selected");
-      setIsLoading(false);
+      setError(t('meeting.noneSelected'));
+      setIsSummaryLoading(false);
       Analytics.trackPageView('meeting_details');
       return;
     }
@@ -197,7 +201,7 @@ function MeetingDetailsContent() {
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
-    setIsLoading(true);
+    setIsSummaryLoading(true);
 
     const fetchMeetingSummary = async () => {
       try {
@@ -305,12 +309,12 @@ function MeetingDetailsContent() {
       try {
         await fetchMeetingSummary();
       } finally {
-        setIsLoading(false);
+        setIsSummaryLoading(false);
       }
     };
 
     loadData();
-  }, [meetingId]);
+  }, [meetingId, t]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
   useEffect(() => {
@@ -344,15 +348,17 @@ function MeetingDetailsContent() {
             onClick={() => router.push('/')}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
-            Go Back
+            {t('common.back')}
           </button>
         </div>
       </div>
     );
   }
 
-  // Show loading spinner while initial data loads
-  if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
+  // Show loading spinner only while transcript data loads (metadata + first page).
+  // The summary loads asynchronously inside PageContent, so it no longer blocks
+  // the first paint of the meeting content.
+  if (isLoadingTranscripts || !meetingDetails) {
     return <div className="flex items-center justify-center h-screen">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
@@ -361,6 +367,7 @@ function MeetingDetailsContent() {
   return <PageContent
     meeting={meetingDetails}
     summaryData={meetingSummary}
+    isSummaryFetching={isSummaryLoading}
     shouldAutoGenerate={shouldAutoGenerate}
     onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
     onMeetingUpdated={async () => {
@@ -377,6 +384,7 @@ function MeetingDetailsContent() {
     totalCount={totalCount}
     loadedCount={loadedCount}
     onLoadMore={loadMore}
+    onJumpToOffset={jumpToOffset}
   />;
 }
 

@@ -165,6 +165,32 @@ impl MeetingsRepository {
         Ok((transcripts, total.0))
     }
 
+    /// Returns the pagination offset of the first transcript whose audio start
+    /// time is at or after `timestamp`. Mirrors `get_meeting_transcripts_paginated`
+    /// ordering (`ORDER BY audio_start_time ASC`, NULLs first) so that loading a
+    /// page starting at this offset surfaces the transcript playing at `timestamp`.
+    pub async fn get_transcript_offset_at(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        timestamp: f64,
+    ) -> Result<i64, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ? AND COALESCE(audio_start_time, -1) < ?",
+        )
+        .bind(meeting_id)
+        .bind(timestamp)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count.0)
+    }
+
     pub async fn update_meeting_title(
         pool: &SqlitePool,
         meeting_id: &str,

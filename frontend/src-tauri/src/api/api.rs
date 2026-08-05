@@ -1,7 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
@@ -893,6 +893,83 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
         Err(e) => {
             log_error!("Error retrieving transcripts for meeting {}: {}", meeting_id, e);
             Err(format!("Failed to retrieve transcripts: {}", e))
+        }
+    }
+}
+
+/// Resolves the recording audio file for a meeting and allows the asset
+/// protocol to serve it, so the frontend can stream it in an `<audio>` element
+/// (asset:// URLs support HTTP Range requests, enabling seek without
+/// re-downloading the whole file).
+#[tauri::command]
+pub async fn api_get_meeting_audio<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<String>, String> {
+    log_info!("api_get_meeting_audio called for meeting_id: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to fetch meeting metadata: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+
+    let Some(folder_path) = meeting.folder_path else {
+        log_warn!("Meeting {} has no folder_path", meeting_id);
+        return Ok(None);
+    };
+
+    match crate::audio::retranscription::find_audio_file(std::path::Path::new(&folder_path)) {
+        Ok(audio_path) => {
+            if let Err(e) = app.asset_protocol_scope().allow_file(&audio_path) {
+                log_error!("Failed to allow audio file in asset scope: {}", e);
+                return Err(format!("Failed to allow audio file access: {}", e));
+            }
+            log_info!(
+                "Resolved audio file for {}: {}",
+                meeting_id,
+                audio_path.display()
+            );
+            Ok(Some(audio_path.to_string_lossy().to_string()))
+        }
+        Err(e) => {
+            log_info!("No audio file found for meeting {}: {}", meeting_id, e);
+            Ok(None)
+        }
+    }
+}
+
+/// Returns the pagination offset of the transcript playing at `timestamp`,
+/// so the frontend can load the page containing it when playback jumps into
+/// not-yet-loaded territory.
+#[tauri::command]
+pub async fn api_get_transcript_offset_at<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    timestamp: f64,
+) -> Result<i64, String> {
+    let pool = state.db_manager.pool();
+
+    match MeetingsRepository::get_transcript_offset_at(pool, &meeting_id, timestamp).await {
+        Ok(offset) => {
+            log_info!(
+                "Transcript offset for {} at {}s: {}",
+                meeting_id,
+                timestamp,
+                offset
+            );
+            Ok(offset)
+        }
+        Err(e) => {
+            log_error!(
+                "Failed to compute transcript offset for {}: {}",
+                meeting_id,
+                e
+            );
+            Err(format!("Failed to compute transcript offset: {}", e))
         }
     }
 }

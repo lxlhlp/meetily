@@ -25,6 +25,10 @@ interface UsePaginatedTranscriptsReturn {
     loadMore: () => Promise<void>;
     reset: () => void;
     refetch: () => Promise<void>;
+    /** Replaces the loaded window with the page starting at `offset`
+     *  (used to jump the playback highlight to a timestamp beyond
+     *  the currently loaded pages). */
+    jumpToOffset: (offset: number) => Promise<void>;
 }
 
 /**
@@ -166,6 +170,18 @@ export function usePaginatedTranscripts({
         }
     }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
 
+    // Jump to the page starting at a specific offset (replaces current content)
+    const jumpToOffset = useCallback(async (offset: number) => {
+        if (!meetingId) return;
+
+        setIsLoadingMore(true);
+        try {
+            await loadTranscriptsAtOffset(offset, false);
+        } finally {
+            setIsLoadingMore(false);
+        }
+    }, [meetingId, loadTranscriptsAtOffset]);
+
     // Initial load
     useEffect(() => {
         if (!meetingId) {
@@ -211,5 +227,6 @@ export function usePaginatedTranscripts({
         loadMore,
         reset,
         refetch,
+        jumpToOffset,
     };
 }

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
+import { useI18n } from '@/i18n';
 import { labelForCode } from '@/lib/summary-languages';
 import {
   readMeetingSummaryLanguage,
@@ -40,6 +41,9 @@ interface SummaryPanelProps {
   onCopySummary: () => Promise<void>;
   onOpenFolder: () => Promise<void>;
   aiSummary: Summary | null;
+  /** True while the summary is being fetched from the backend on page entry;
+   *  renders a lightweight loading state instead of the empty/generate state. */
+  isSummaryFetching?: boolean;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
@@ -78,6 +82,7 @@ export function SummaryPanel({
   onCopySummary,
   onOpenFolder,
   aiSummary,
+  isSummaryFetching = false,
   summaryStatus,
   transcripts,
   modelConfig,
@@ -118,13 +123,14 @@ export function SummaryPanel({
     };
   } | null>(null);
   activeMeetingIdRef.current = meeting.id;
+  const { t } = useI18n();
   const { addRecent } = useRecentLanguages();
 
-  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
+  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : t('meeting.auto');
   const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
   const autoSubtitle = isLocalFallbackLanguage
-    ? 'Saved on this device for folderless meetings'
-    : 'Uses dominant transcript language';
+    ? t('meeting.savedOnDeviceDesc')
+    : t('meeting.usesDominantLanguage');
 
   useEffect(() => {
     let cancelled = false;
@@ -140,8 +146,8 @@ export function SummaryPanel({
         }
       } catch (err) {
         console.error('Failed to load summary language:', err);
-        toast.warning('Could not load saved summary language', {
-          description: 'Using Auto until meeting metadata can be read.',
+        toast.warning(t('meeting.couldNotLoadSummaryLang'), {
+          description: t('meeting.usingAutoFallback'),
         });
         if (!cancelled && languageLoadVersionRef.current === loadVersion) setSummaryLang(null);
       }
@@ -173,8 +179,8 @@ export function SummaryPanel({
             setSummaryLang(saved.language);
             setSummaryLangStorage(saved.storage);
             if (saved.storage === 'local_fallback') {
-              toast.info('Summary language saved on this device', {
-                description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+              toast.info(t('meeting.summaryLangSavedOnDevice'), {
+                description: t('meeting.savedOnDeviceDesc'),
               });
             }
             if (request.language) {
@@ -191,7 +197,7 @@ export function SummaryPanel({
             activeMeetingIdRef.current === request.meetingId
           ) {
             console.error('Failed to persist summary language:', err);
-            toast.error('Failed to save summary language');
+            toast.error(t('meeting.failedToSaveSummaryLang'));
             setSummaryLang(request.rollback.language);
             setSummaryLangStorage(request.rollback.storage);
             return;
@@ -234,8 +240,8 @@ export function SummaryPanel({
         <Button
           variant="outline"
           size="sm"
-          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? ' (saved on this device)' : ''}`}
-          aria-label="Set summary language"
+          title={`${t('meeting.summaryLanguageTitle', { lang: effectiveLangLabel })}${isLocalFallbackLanguage ? ` (${t('meeting.savedOnDevice')})` : ''}`}
+          aria-label={t('meeting.setSummaryLanguage')}
         >
           <Languages size={18} />
           <span className="hidden lg:inline">{effectiveLangLabel}</span>
@@ -357,10 +363,21 @@ export function SummaryPanel({
             <div className="flex items-center justify-center flex-1">
               <div className="text-center">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                <p className="text-gray-600">Generating AI Summary...</p>
+                <p className="text-gray-600">{t('meeting.generatingAiSummary')}</p>
               </div>
             </div>
           )}
+        </div>
+      ) : isSummaryFetching && !aiSummary ? (
+        /* Initial summary fetch (page entry) - lightweight loading that does
+           not block the transcript from painting */
+        <div className="flex flex-col h-full">
+          <div className="flex items-center justify-center flex-1">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-3"></div>
+              <p className="text-sm text-gray-500">{t('meeting.loadingSummary')}</p>
+            </div>
+          </div>
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
@@ -395,10 +412,10 @@ export function SummaryPanel({
         <div className="flex-1 overflow-y-auto min-h-0">
           {summaryResponse && (
             <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
+              <h3 className="text-lg font-semibold mb-2">{t('meeting.meetingSummary')}</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white p-4 rounded-lg shadow-sm">
-                  <h4 className="font-medium mb-1">Key Points</h4>
+                  <h4 className="font-medium mb-1">{t('meeting.keyPoints')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.key_points.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -406,7 +423,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Action Items</h4>
+                  <h4 className="font-medium mb-1">{t('meeting.actionItems')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.action_items.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -414,7 +431,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Decisions</h4>
+                  <h4 className="font-medium mb-1">{t('meeting.decisions')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.decisions.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -422,7 +439,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Main Topics</h4>
+                  <h4 className="font-medium mb-1">{t('meeting.mainTopics')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.main_topics.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -432,7 +449,7 @@ export function SummaryPanel({
               </div>
               {summaryResponse.raw_summary ? (
                 <div className="mt-4">
-                  <h4 className="font-medium mb-1">Full Summary</h4>
+                  <h4 className="font-medium mb-1">{t('meeting.fullSummary')}</h4>
                   <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
                 </div>
               ) : null}

@@ -17,10 +17,12 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useI18n } from '@/i18n';
 
 export default function PageContent({
   meeting,
   summaryData,
+  isSummaryFetching = false,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -32,9 +34,11 @@ export default function PageContent({
   totalCount,
   loadedCount,
   onLoadMore,
+  onJumpToOffset,
 }: {
   meeting: any;
   summaryData: Summary | null;
+  isSummaryFetching?: boolean;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -46,7 +50,10 @@ export default function PageContent({
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+  /** Replaces the loaded transcript window with the page at this offset */
+  onJumpToOffset?: (offset: number) => Promise<void>;
 }) {
+  const { t } = useI18n();
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
     summaryDataKeys: summaryData ? Object.keys(summaryData) : null,
@@ -117,10 +124,10 @@ export default function PageContent({
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Model settings saved successfully');
+      toast.success(t('summary.settingsSaved'));
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error('Failed to save model settings');
+      toast.error(t('summarySettings.saveFailed'));
     }
   };
 
@@ -217,10 +224,12 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          onJumpToOffset={onJumpToOffset}
         />
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
+          isSummaryFetching={isSummaryFetching}
           onTitleChange={meetingData.handleTitleChange}
           isEditingTitle={meetingData.isEditingTitle}
           onStartEditTitle={() => meetingData.setIsEditingTitle(true)}

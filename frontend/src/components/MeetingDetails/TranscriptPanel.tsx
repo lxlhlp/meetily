@@ -5,8 +5,10 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { QuickPromptChips } from './QuickPromptChips';
+import { MeetingAudioPlayerBar } from './MeetingAudioPlayerBar';
+import { useMeetingAudioPlayer } from '@/hooks/meeting-details/useMeetingAudioPlayer';
 import { useI18n } from '@/i18n';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -16,6 +18,9 @@ interface TranscriptPanelProps {
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
   disableAutoScroll?: boolean;
+  /** Replaces the loaded transcript window with the page at this offset
+   *  (playback highlight jumps into not-yet-loaded territory) */
+  onJumpToOffset?: (offset: number) => Promise<void>;
 
   // Optional pagination props (when using virtualization)
   usePagination?: boolean;
@@ -40,6 +45,7 @@ export function TranscriptPanel({
   onOpenMeetingFolder,
   isRecording,
   disableAutoScroll = false,
+  onJumpToOffset,
   usePagination = false,
   segments,
   hasMore,
@@ -67,6 +73,17 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  // Recording player lives here (not in the page) so its ~4Hz timeupdate
+  // re-renders only this panel's subtree, never the summary editor.
+  const noopJumpToOffset = useCallback(async () => {}, []);
+  const audioPlayer = useMeetingAudioPlayer({
+    meetingId: meetingId ?? '',
+    segments: convertedSegments,
+    loadedCount: loadedCount ?? 0,
+    hasMore: hasMore ?? false,
+    onJumpToOffset: onJumpToOffset ?? noopJumpToOffset,
+  });
+
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
       {/* Title area */}
@@ -81,6 +98,9 @@ export function TranscriptPanel({
         />
       </div>
 
+      {/* Recording player (only when the meeting has an audio file) */}
+      {audioPlayer?.audioSrc && <MeetingAudioPlayerBar player={audioPlayer} />}
+
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
@@ -92,6 +112,8 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          activeSegmentId={audioPlayer?.activeSegmentId ?? undefined}
+          onSegmentClick={audioPlayer?.audioSrc ? audioPlayer.onSegmentClick : undefined}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}
