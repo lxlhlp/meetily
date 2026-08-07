@@ -913,6 +913,8 @@ impl AudioPipeline {
                                                 warn!("Failed to send VAD segment: {}", e);
                                             } else {
                                                 self.chunk_id_counter += 1;
+                                                // Liveness heartbeat for the transcription watchdog
+                                                super::transcription::worker::record_vad_dispatch();
                                             }
                                         } else {
                                             debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",

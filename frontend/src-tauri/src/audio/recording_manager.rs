@@ -196,6 +196,40 @@ impl RecordingManager {
                             log::info!("🔊 {:?} stream recovered, chunks flowing again", device_type);
                         }
                     }
+
+                    // Transcription liveness: live captions can freeze silently
+                    // (worker panic kills the task without any error surfacing,
+                    // or the MOSS server stops answering). Audio streams may
+                    // look healthy the whole time, so check the transcription
+                    // heartbeats too. Thresholds are generous (2 min) to avoid
+                    // false alarms on quiet stretches.
+                    const TXN_STALL_SECS: u64 = 120;
+                    if watchdog_started.elapsed().as_secs() >= 60 {
+                        use super::transcription::worker as txn;
+                        match txn::vad_dispatch_age_secs() {
+                            Some(age) if age > TXN_STALL_SECS => {
+                                log::error!(
+                                    "🧊 TRANSCRIPTION STALLED (upstream): no VAD segment dispatched for >{}s while recording - pipeline/VAD path broken",
+                                    TXN_STALL_SECS
+                                );
+                            }
+                            None => {
+                                // No VAD segment at all this session (e.g. all
+                                // silence) - normal, keep watching.
+                            }
+                            _ => {}
+                        }
+                        if let Some(age) = txn::result_emit_age_secs() {
+                            if age > TXN_STALL_SECS
+                                && txn::vad_dispatch_age_secs().map(|a| a <= 60).unwrap_or(false)
+                            {
+                                log::error!(
+                                    "🧊 TRANSCRIPTION STALLED (worker): VAD segments flowing but no result emitted for >{}s - worker stuck (hung MOSS request or dead task)",
+                                    TXN_STALL_SECS
+                                );
+                            }
+                        }
+                    }
                 }
                 log::debug!("Stall watchdog exited");
             });

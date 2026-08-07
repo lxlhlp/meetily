@@ -17,6 +17,49 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+// Transcription liveness heartbeats (unix millis), read by the recording
+// watchdog to distinguish "pipeline stopped producing VAD segments" from
+// "worker stuck" when live captions freeze silently.
+static LAST_VAD_DISPATCH_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_RESULT_EMIT_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Reset the transcription liveness heartbeats for a new recording session.
+pub fn reset_transcription_liveness() {
+    LAST_VAD_DISPATCH_MS.store(0, Ordering::SeqCst);
+    LAST_RESULT_EMIT_MS.store(0, Ordering::SeqCst);
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Called by the audio pipeline whenever a VAD segment is handed to the
+/// transcription dispatcher. `None` means no segment ever dispatched.
+pub fn record_vad_dispatch() {
+    LAST_VAD_DISPATCH_MS.store(now_millis(), Ordering::SeqCst);
+}
+
+/// Called by the worker whenever a transcript result is emitted.
+/// `None` means no result ever emitted this session.
+pub fn record_result_emit() {
+    LAST_RESULT_EMIT_MS.store(now_millis(), Ordering::SeqCst);
+}
+
+/// Age (seconds) since the last VAD dispatch, or `None` if never dispatched.
+pub fn vad_dispatch_age_secs() -> Option<u64> {
+    let t = LAST_VAD_DISPATCH_MS.load(Ordering::SeqCst);
+    if t == 0 { None } else { Some(now_millis().saturating_sub(t) / 1000) }
+}
+
+/// Age (seconds) since the last transcript result emit, or `None` if never emitted.
+pub fn result_emit_age_secs() -> Option<u64> {
+    let t = LAST_RESULT_EMIT_MS.load(Ordering::SeqCst);
+    if t == 0 { None } else { Some(now_millis().saturating_sub(t) / 1000) }
+}
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
@@ -48,6 +91,9 @@ pub fn start_transcription_task<R: Runtime>(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
+
+        // Fresh liveness heartbeats for this recording session
+        reset_transcription_liveness();
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
         let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await {
@@ -226,6 +272,8 @@ pub fn start_transcription_task<R: Runtime>(
                                                 worker_id, e
                                             );
                                         }
+                                        // Liveness heartbeat: captions are flowing
+                                        record_result_emit();
                                         // PERFORMANCE: Removed verbose logging of every emission
                                     } else if !transcript.trim().is_empty() && should_log_this_chunk
                                     {

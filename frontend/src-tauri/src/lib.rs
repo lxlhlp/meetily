@@ -388,6 +388,27 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
+    // Log panics to the log file. tokio tasks (transcription worker, audio
+    // pipeline, ...) that panic only kill their own task - without this hook
+    // the panic message goes to stderr only, which the packaged app never
+    // shows, leaving silent failures (e.g. frozen live captions) undiagnosable.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic payload".to_string()
+        };
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        log::error!("💥 PANIC at {}: {}", location, msg);
+        // Also print to stderr for dev runs
+        eprintln!("PANIC at {}: {}", location, msg);
+    }));
+
     let log_level: log::LevelFilter = std::env::var("RUST_LOG")
         .ok()
         .and_then(|v| v.parse().ok())

@@ -24,9 +24,25 @@ pub struct ContinuousVadProcessor {
     in_speech: bool,
     processed_samples: usize,
     speech_start_sample: usize,
+    /// Original redemption time (ms) - kept to rebuild the session identically
+    /// when it is periodically recreated (see recreate_session_if_needed).
+    redemption_time_ms: u32,
+    /// 16kHz sample position where the current silero session started.
+    /// silero-rs timestamps are relative to session creation; when the
+    /// session is recreated (see SESSION_RECREATE_AFTER), transition
+    /// timestamps restart from 0 and must be offset by this origin.
+    session_origin_samples: usize,
     // State tracking for smart logging
     last_logged_state: bool,
 }
+
+/// Recreate the silero VAD session once it has seen this much audio.
+/// silero-rs panics with "Duration Xms is outside of session audio range"
+/// when `deleted_samples` (trimmed silence/speech) overtakes the start of
+/// the current utterance - observed in production after ~230s of session
+/// audio (killed the audio pipeline task, freezing live captions with no
+/// error). Recreating at a silence boundary keeps the internal window small.
+const SESSION_RECREATE_AFTER_MS: u64 = 120_000;
 
 impl ContinuousVadProcessor {
     pub fn new(input_sample_rate: u32, redemption_time_ms: u32) -> Result<Self> {
@@ -77,9 +93,46 @@ impl ContinuousVadProcessor {
             in_speech: false,
             processed_samples: 0,
             speech_start_sample: 0,
+            redemption_time_ms,
+            session_origin_samples: 0,
             // Initialize state tracking
             last_logged_state: false,
         })
+    }
+
+    /// Rebuild the silero session with fresh internal buffers. Called at a
+    /// silence boundary once the session has accumulated enough audio to risk
+    /// the crate's internal range panic. VAD is stateless across utterances,
+    /// so nothing meaningful is lost.
+    fn recreate_session_if_needed(&mut self) -> Result<()> {
+        if self.in_speech {
+            return Ok(()); // never split an in-flight utterance
+        }
+        if self.session.session_time().as_millis() < SESSION_RECREATE_AFTER_MS as u128 {
+            return Ok(());
+        }
+
+        info!(
+            "VAD: recreating silero session after {:.0}s of session audio (previous: {} samples processed)",
+            self.session.session_time().as_millis() as f64 / 1000.0,
+            self.processed_samples
+        );
+
+        // Rebuild with identical tuning
+        let mut config = VadConfig::default();
+        config.sample_rate = 16000;
+        config.positive_speech_threshold = 0.50;
+        config.negative_speech_threshold = 0.35;
+        config.redemption_time = Duration::from_millis(self.redemption_time_ms as u64);
+        config.pre_speech_pad = Duration::from_millis(500);
+        config.post_speech_pad = Duration::from_millis(400);
+        config.min_speech_time = Duration::from_millis(250);
+
+        self.session = VadSession::new(config)
+            .map_err(|e| anyhow!("Failed to recreate VAD session: {:?}", e))?;
+        // New session's transition timestamps start from 0
+        self.session_origin_samples = self.processed_samples;
+        Ok(())
     }
 
     /// Process incoming audio samples and return any complete speech segments
@@ -91,6 +144,10 @@ impl ContinuousVadProcessor {
         } else {
             self.resample_to_16k(samples)?
         };
+
+        // Recreate the silero session at a silence boundary if it has
+        // accumulated enough audio (see SESSION_RECREATE_AFTER_MS)
+        self.recreate_session_if_needed()?;
 
         self.buffer.extend_from_slice(&resampled_audio);
         let mut completed_segments = Vec::new();
@@ -236,8 +293,11 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples.
+                    // timestamp_ms is relative to the current silero session; the origin offset
+                    // keeps positions absolute across periodic session recreations.
+                    self.speech_start_sample = self.session_origin_samples
+                        + (timestamp_ms as usize * 16000 / 1000);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
@@ -256,10 +316,11 @@ impl ContinuousVadProcessor {
                     };
 
                     if !speech_samples.is_empty() {
+                        let origin_ms = self.session_origin_samples as f64 / 16.0;
                         let segment = SpeechSegment {
                             samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
-                            end_timestamp_ms: end_timestamp_ms as f64,
+                            start_timestamp_ms: origin_ms + start_timestamp_ms as f64,
+                            end_timestamp_ms: origin_ms + end_timestamp_ms as f64,
                             confidence: 0.9, // VAD confidence
                         };
 
@@ -589,6 +650,53 @@ mod tests {
             println!("2000ms segment {}: {:.0}ms duration", i, duration_ms);
             // Each segment should be at least 250ms (min_speech_time)
             assert!(duration_ms >= 200.0, "Segment {} too short: {:.0}ms", i, duration_ms);
+        }
+    }
+
+    #[test]
+    fn test_vad_session_recreation_bounds_session_window() {
+        // Regression test for the silero-rs range panic that froze live
+        // captions in production ("Duration Xms is outside of session audio
+        // range" after ~230s of session audio): the session must be recreated
+        // at a silence boundary so its internal window never approaches the
+        // dangerous size, and the origin offset must keep segment timestamps
+        // absolute (they are relative to the current session otherwise).
+        let mut processor = ContinuousVadProcessor::new(16000, 2000).expect("Failed to create processor");
+
+        // 140s of audio = speech 5s / silence 5s cycles → crosses 120s threshold
+        let audio = generate_test_audio_with_speech(140.0, 16000);
+        let mut all_segments = Vec::new();
+        for chunk in audio.chunks(160_000) {
+            let segments = processor.process_audio(chunk).expect("VAD processing failed");
+            all_segments.extend(segments);
+        }
+        all_segments.extend(processor.flush().expect("VAD flush failed"));
+
+        // The session window must have been recreated and stay bounded well
+        // below the ~230s panic region observed in production.
+        assert!(
+            processor.session.session_time().as_millis() < 130_000,
+            "Session window not bounded after recreation: {}ms",
+            processor.session.session_time().as_millis()
+        );
+        // Recreation must have happened (origin moved past 120s worth of samples)
+        assert!(
+            processor.session_origin_samples >= 120_000 * 16,
+            "Session was never recreated (origin: {})",
+            processor.session_origin_samples
+        );
+        // No panic occurred while processing (implicit - we got here).
+        // Any segments that were produced must keep absolute (monotonic) times
+        // across the recreation boundary - a dropped origin would reset them.
+        let mut prev = -1.0;
+        for s in &all_segments {
+            assert!(
+                s.start_timestamp_ms >= prev,
+                "Segment start went backwards: {} < {}",
+                s.start_timestamp_ms,
+                prev
+            );
+            prev = s.start_timestamp_ms;
         }
     }
 }
