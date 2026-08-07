@@ -77,3 +77,4 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+!frontend/src-tauri/tests/fixtures/*.wav

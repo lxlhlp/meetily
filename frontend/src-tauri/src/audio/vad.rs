@@ -63,7 +63,14 @@ impl ContinuousVadProcessor {
         // Previous: capped at 400ms, causing VAD to fragment 5-second speech into 40ms segments
         // New: Use full redemption_time from pipeline (2000ms) to bridge natural pauses
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
-        config.pre_speech_pad = Duration::from_millis(500);   // Pre-speech padding for context (soft onsets were getting clipped at 300ms)
+        // CRITICAL: pre_speech_pad MUST stay below redemption_time. silero-rs
+        // panics with "Duration Xms is outside of session audio range" when a
+        // new utterance starts less than pre_speech_pad after the previous
+        // commit: start_ms = processed - pad, deleted = prev_end, and with
+        // redemption=400ms a pause of 400-900ms makes start_ms fall inside
+        // the already-committed region (observed in production at 8.8s/23s/
+        // 230s into recordings). 250ms keeps context while leaving margin.
+        config.pre_speech_pad = Duration::from_millis(250);
         config.post_speech_pad = Duration::from_millis(400);  // Increased: more context at end
 
         // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
@@ -124,7 +131,7 @@ impl ContinuousVadProcessor {
         config.positive_speech_threshold = 0.50;
         config.negative_speech_threshold = 0.35;
         config.redemption_time = Duration::from_millis(self.redemption_time_ms as u64);
-        config.pre_speech_pad = Duration::from_millis(500);
+        config.pre_speech_pad = Duration::from_millis(250); // must stay < redemption_time (see comment above)
         config.post_speech_pad = Duration::from_millis(400);
         config.min_speech_time = Duration::from_millis(250);
 
@@ -651,6 +658,55 @@ mod tests {
             // Each segment should be at least 250ms (min_speech_time)
             assert!(duration_ms >= 200.0, "Segment {} too short: {:.0}ms", i, duration_ms);
         }
+    }
+
+    #[test]
+    fn test_vad_micro_pause_does_not_panic() {
+        // Regression for the production panic "Duration Xms is outside of
+        // session audio range". With pre_speech_pad (500ms) > redemption_time
+        // (400ms), a pause of 400-900ms between utterances makes the next
+        // utterance's start_ms (processed - pad) fall inside the previous
+        // commit's deleted region -> panic in the crate. The fixture is two
+        // speech bursts separated by 450ms of silence; 20 loops also cross
+        // the 120s session-recreation boundary.
+        let wav = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/vad_micro_pause.wav"
+        ))
+        .expect("fixture missing: run say+ffmpeg to regenerate");
+        let samples = decode_wav_pcm16(&wav);
+
+        let mut processor = ContinuousVadProcessor::new(16000, 400).unwrap();
+        let mut segments = 0usize;
+        for _ in 0..20 {
+            for window in samples.chunks(9600) {
+                segments += processor
+                    .process_audio(window)
+                    .expect("VAD processing failed (silero session range panic?)")
+                    .len();
+            }
+        }
+        segments += processor.flush().expect("VAD flush failed").len();
+        assert!(segments >= 1, "expected speech to be detected in the fixture");
+    }
+
+    /// Minimal 16-bit PCM mono WAV decoder (16kHz fixtures).
+    fn decode_wav_pcm16(wav: &[u8]) -> Vec<f32> {
+        // Skip RIFF/WAVE headers and find the data chunk
+        let mut offset = 12; // after "RIFF....WAVE"
+        let mut data: &[u8] = &[];
+        while offset + 8 <= wav.len() {
+            let chunk_id = &wav[offset..offset + 4];
+            let chunk_len = u32::from_le_bytes(wav[offset + 4..offset + 8].try_into().unwrap()) as usize;
+            if chunk_id == b"data" {
+                data = &wav[offset + 8..offset + 8 + chunk_len.min(wav.len() - offset - 8)];
+                break;
+            }
+            offset += 8 + chunk_len + (chunk_len % 2);
+        }
+        data.chunks_exact(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+            .collect()
     }
 
     #[test]
