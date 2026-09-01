@@ -1,6 +1,6 @@
 [package]
 name = "meetily"
-version = "0.4.0"
+version = "0.4.1"  # 与 tauri.conf.json 对齐（uplink 接入时发现 0.4.1/0.4.0 不一致）
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
@@ -153,6 +153,9 @@ sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 
 # Common Tauri configuration
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
+# Uplink 更新平台 Rust 侧（vendor 自 codeup tag uplink-updater-tauri-v0.9.1，与 npm
+# @uplink/updater-sdk 版本强制对齐；升级 = 按新 tag 重新 vendor 并同步 package.json）
+uplink-updater-tauri = { path = "vendor/uplink-updater-tauri" }
 tauri-plugin-fs = "2.4.0"
 tauri-plugin-dialog = "2.3.0"
 tauri-plugin-store = "2.4.0"
@@ -190,6 +193,14 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+# WASAPI audio-session query for the recording stall watchdog
+# (capture/output_activity.rs): only alarm on a system-audio stall when an
+# app is actually playing audio.
+windows = { version = "0.57", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+] }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)

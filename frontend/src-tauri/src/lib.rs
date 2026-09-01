@@ -61,6 +61,8 @@ use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
+// Uplink 更新平台 Rust 侧（vendored crate；别名保持既有 uplink_updater:: 命令路径不变）
+use uplink_updater_tauri as uplink_updater;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
@@ -459,6 +461,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(uplink_updater::uplink_updater_plugin(
+            // Uplink 平台基址（不含 /api）。缺省指向 dev 环境（应用 meetily-moss 注册处）；
+            // 构建时可经 MEETILY_UPLINK_BASE_URL 环境变量烘焙覆盖（CI 注入）。红线 2：只用平台地址
+            option_env!("MEETILY_UPLINK_BASE_URL")
+                .unwrap_or("https://uplink.dev.hanfatong.com")
+                .to_string(),
+            "meetily-moss".into(),
+            "0.9.1".into(), // clientUpdaterVersion（与前端 @uplink/updater-sdk 版本对齐）
+        ))
         .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
@@ -573,6 +584,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            uplink_updater::uplink_config,
+            uplink_updater::uplink_set_channel,
+            uplink_updater::uplink_check,
+            uplink_updater::uplink_download,
+            uplink_updater::uplink_install_and_relaunch,
             start_recording,
             stop_recording,
             is_recording,

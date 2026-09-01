@@ -1,26 +1,31 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import Image from 'next/image';
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
-import { UpdateDialog } from "./UpdateDialog";
-import { updateService, UpdateInfo } from '@/services/updateService';
-import { Button } from './ui/button';
-import { Loader2, CheckCircle2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { mountUpdatePanel } from '@uplink/updater-sdk/ui';
+import { createTauriUpdateBridge } from '@uplink/updater-sdk/tauri';
+import { updater } from '@/uplink/updater';
 import { useI18n } from '@/i18n';
 
 
 export function About() {
     const { t } = useI18n();
     const [currentVersion, setCurrentVersion] = useState<string>('0.4.0');
-    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-    const [isChecking, setIsChecking] = useState(false);
-    const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+    const updatePanelHostRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         // Get current version on mount
         getVersion().then(setCurrentVersion).catch(console.error);
+    }, []);
+
+    // Uplink 更新面板卡片（合规 UX 设置区：同意开关默认不勾选/手动检查/版本与机器码展示；
+    // 发现新版本的弹窗与强更遮罩由面板自身 fixed 定位渲染）
+    useEffect(() => {
+        const host = updatePanelHostRef.current;
+        if (!host) return;
+        const panel = mountUpdatePanel(host, { bridge: createTauriUpdateBridge(updater) });
+        return () => panel.unmount();
     }, []);
 
     const handleContactClick = async () => {
@@ -28,24 +33,6 @@ export function About() {
             await invoke('open_external_url', { url: 'https://meetily.zackriya.com/#about' });
         } catch (error) {
             console.error('Failed to open link:', error);
-        }
-    };
-
-    const handleCheckForUpdates = async () => {
-        setIsChecking(true);
-        try {
-            const info = await updateService.checkForUpdates(true);
-            setUpdateInfo(info);
-            if (info.available) {
-                setShowUpdateDialog(true);
-            } else {
-                toast.success(t('settings.upToDate'));
-            }
-        } catch (error: any) {
-            console.error('Failed to check for updates:', error);
-            toast.error(t('settings.checkUpdateFailed', { error: error.message || t('common.unknownError') }));
-        } finally {
-            setIsChecking(false);
         }
     };
 
@@ -67,32 +54,11 @@ export function About() {
                 <p className="text-medium text-gray-600 mt-1">
                     {t('settings.tagline')}
                 </p>
-                <div className="mt-3">
-                    <Button
-                        onClick={handleCheckForUpdates}
-                        disabled={isChecking}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs"
-                    >
-                        {isChecking ? (
-                            <>
-                                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                                {t('settings.checkingForUpdates')}
-                            </>
-                        ) : (
-                            <>
-                                <CheckCircle2 className="h-3 w-3 mr-2" />
-                                {t('settings.checkForUpdates')}
-                            </>
-                        )}
-                    </Button>
-                    {updateInfo?.available && (
-                        <div className="mt-2 text-xs text-blue-600">
-                            {t('settings.updateAvailable')}: v{updateInfo.version}
-                        </div>
-                    )}
-                </div>
+            </div>
+
+            {/* Update panel（SDK 内置合规面板） */}
+            <div className="bg-gray-50 rounded-lg p-3">
+                <div ref={updatePanelHostRef} />
             </div>
 
             {/* Features Grid - Compact */}
@@ -146,13 +112,6 @@ export function About() {
                 </p>
             </div>
             <AnalyticsConsentSwitch />
-
-            {/* Update Dialog */}
-            <UpdateDialog
-                open={showUpdateDialog}
-                onOpenChange={setShowUpdateDialog}
-                updateInfo={updateInfo}
-            />
         </div>
 
     )

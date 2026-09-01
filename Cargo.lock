@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "meetily"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3726,11 +3726,13 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uplink-updater-tauri",
  "url",
  "uuid",
  "whatlang",
  "which 6.0.3",
  "whisper-rs",
+ "windows 0.57.0",
  "xz2",
  "zip 2.4.2",
 ]
@@ -7723,6 +7725,17 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "uplink-updater-tauri"
+version = "0.9.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-updater",
+ "url",
+]
 
 [[package]]
 name = "ureq"

@@ -1,78 +1,58 @@
 'use client'
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { useUpdateCheck } from '@/hooks/useUpdateCheck';
-import { UpdateInfo } from '@/services/updateService';
-import { UpdateDialog } from './UpdateDialog';
-import { setUpdateDialogCallback, showUpdateNotification } from './UpdateNotification';
+import React, { useEffect, useRef } from 'react';
+import { mountUpdatePanel, type UpdatePanelHandle } from '@uplink/updater-sdk/ui';
+import { createTauriUpdateBridge } from '@uplink/updater-sdk/tauri';
+import { toast } from 'sonner';
+import { updater } from '@/uplink/updater';
+import { useI18n } from '@/i18n';
 
-interface UpdateCheckContextType {
-  updateInfo: UpdateInfo | null;
-  isChecking: boolean;
-  checkForUpdates: (force?: boolean) => Promise<void>;
-  showUpdateDialog: () => void;
-}
-
-const UpdateCheckContext = createContext<UpdateCheckContextType | undefined>(undefined);
-
+/**
+ * 应用级更新接线（Uplink SDK 内置合规面板，红线 6 不再手写）：
+ * - 根部常驻一个 off-screen 面板宿主：自动检查（启动 10s + 每 24h）发现新版本时由
+ *   面板 decide() 分档——notify 弹可关闭通知（稍后提醒 3 天）、force 弹不可关闭遮罩；
+ *   弹窗/遮罩为 fixed 定位，不依赖宿主容器位置，设置卡片本体置于视口外。
+ * - 设置页 About 标签内另挂一个可见面板卡片（同意开关/手动检查/机器码展示）。
+ * - 托盘「检查更新」→ 手动检查：有更新经面板弹窗，无更新 toast 提示。
+ */
 export function UpdateCheckProvider({ children }: { children: React.ReactNode }) {
-  const [showDialog, setShowDialog] = useState(false);
+  const rootHostRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<UpdatePanelHandle | null>(null);
+  const { t } = useI18n();
 
-  const handleShowDialog = useCallback(() => {
-    setShowDialog(true);
+  useEffect(() => {
+    const host = rootHostRef.current;
+    if (!host) return;
+    const panel = mountUpdatePanel(host, { bridge: createTauriUpdateBridge(updater) });
+    panelRef.current = panel;
+    const stopAutoCheck = updater.startAutoCheck((version) => void panel.handleDiscovered(version));
+    return () => {
+      stopAutoCheck();
+      panel.unmount();
+      panelRef.current = null;
+    };
   }, []);
 
-  const { updateInfo, isChecking, checkForUpdates } = useUpdateCheck({
-    checkOnMount: true,
-    showNotification: true,
-    onUpdateAvailable: (info) => {
-      // Show notification, dialog will be shown when user clicks notification
-      showUpdateNotification(info, handleShowDialog);
-    },
-  });
-
   useEffect(() => {
-    // Register the callback so UpdateNotification can trigger the dialog
-    setUpdateDialogCallback(handleShowDialog);
-    return () => {
-      setUpdateDialogCallback(() => {});
+    const handleTrayCheck = async () => {
+      const outcome = await updater.check();
+      if (outcome.kind === 'update' && outcome.version !== undefined) {
+        void panelRef.current?.handleDiscovered(outcome.version);
+      } else if (outcome.kind === 'no-update') {
+        toast.info(t('settings.upToDate'));
+      } else {
+        toast.error(t('settings.checkUpdateFailed', { error: outcome.message ?? '' }));
+      }
     };
-  }, [handleShowDialog]);
-
-  // Listen for tray menu events
-  useEffect(() => {
-    const handleTrayCheck = () => {
-      checkForUpdates(true); // Force check from tray
-      setShowDialog(true);
-    };
-
     window.addEventListener('check-updates-from-tray', handleTrayCheck);
     return () => window.removeEventListener('check-updates-from-tray', handleTrayCheck);
-  }, [checkForUpdates]);
+  }, [t]);
 
   return (
-    <UpdateCheckContext.Provider
-      value={{
-        updateInfo,
-        isChecking,
-        checkForUpdates,
-        showUpdateDialog: handleShowDialog,
-      }}
-    >
+    <>
       {children}
-      <UpdateDialog
-        open={showDialog}
-        onOpenChange={setShowDialog}
-        updateInfo={updateInfo}
-      />
-    </UpdateCheckContext.Provider>
+      {/* 面板宿主：设置卡片置于视口外不可见；面板内弹窗/强更遮罩为 fixed 定位照常显示 */}
+      <div ref={rootHostRef} style={{ position: 'fixed', top: 0, left: -10000, width: 560 }} />
+    </>
   );
-}
-
-export function useUpdateCheckContext() {
-  const context = useContext(UpdateCheckContext);
-  if (context === undefined) {
-    throw new Error('useUpdateCheckContext must be used within UpdateCheckProvider');
-  }
-  return context;
 }

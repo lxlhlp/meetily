@@ -633,7 +633,12 @@ jobs:
           Get-ChildItem $runtimeDir -ErrorAction SilentlyContinue
 
       - name: Install frontend dependencies
+        shell: bash
+        env:
+          NPM_UPLINK_TOKEN: ${{ secrets.NPM_UPLINK_TOKEN }}
         run: |
+          # @uplink scope 走 Aliyun 私有源（frontend/.npmrc 已声明 registry），凭据写入 runner 级 ~/.npmrc
+          echo "//packages.aliyun.com/600928eb57a5c7b95a42ac89/npm/repo-jtpde/:_authToken=${NPM_UPLINK_TOKEN}" >> ~/.npmrc
           cd frontend
           pnpm install
 
@@ -678,6 +683,9 @@ jobs:
           # Supabase configuration (for online license verification)
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # Uplink 更新平台基址（前端 Next 构建内联 + Rust option_env! 构建期烘焙）
+          NEXT_PUBLIC_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
+          MEETILY_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
         with:
           projectPath: frontend
           args: --target x86_64-pc-windows-msvc --features vulkan ${{ steps.build-profile.outputs.args }}
