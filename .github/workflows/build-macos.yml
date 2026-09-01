@@ -188,8 +188,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           # Uplink 更新平台基址（前端 Next 构建内联 + Rust option_env! 构建期烘焙）
-          NEXT_PUBLIC_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
-          MEETILY_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
+          NEXT_PUBLIC_UPLINK_BASE_URL: https://uplink.internal.hanfatong.com
+          MEETILY_UPLINK_BASE_URL: https://uplink.internal.hanfatong.com
         with:
           projectPath: frontend
           args: --target ${{ inputs.target }} ${{ steps.build-profile.outputs.args }}
@@ -208,8 +208,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           # Uplink 更新平台基址（前端 Next 构建内联 + Rust option_env! 构建期烘焙）
-          NEXT_PUBLIC_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
-          MEETILY_UPLINK_BASE_URL: https://uplink.dev.hanfatong.com
+          NEXT_PUBLIC_UPLINK_BASE_URL: https://uplink.internal.hanfatong.com
+          MEETILY_UPLINK_BASE_URL: https://uplink.internal.hanfatong.com
         with:
           projectPath: frontend
           args: --target ${{ inputs.target }} ${{ steps.build-profile.outputs.args }}

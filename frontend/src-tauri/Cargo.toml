@@ -1,6 +1,6 @@
 [package]
 name = "meetily"
-version = "0.4.1"  # 与 tauri.conf.json 对齐（uplink 接入时发现 0.4.1/0.4.0 不一致）
+version = "0.4.2"  # 与 tauri.conf.json 对齐
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"

@@ -92,7 +92,7 @@ unzip -oq pkg.zip   # 解压后按路径取 exe/dmg
 
 ### 打包相关配置红线
 
-- **自动更新走 Uplink 平台（dev 环境 `https://uplink.dev.hanfatong.com`，应用标识 `meetily-moss`）**，不走 GitHub Releases。`createUpdaterArtifacts: true`——updater 制品（`.exe.sig` / `.app.tar.gz`+`.sig`）由 CI 的 `TAURI_SIGNING_PRIVATE_KEY` secret 签名（minisign 私钥存 uplink 仓库 `apps/.dev-credentials/meetily-moss.minisign.key`，密码为空；公钥已登记平台，**不可更换**）。本地 `tauri build` 需先 `export TAURI_SIGNING_PRIVATE_KEY=$(cat <私钥路径)`，且必须设 `NEXT_PUBLIC_UPLINK_BASE_URL` + `MEETILY_UPLINK_BASE_URL`（前端 `resolveBaseUrl` 打包态缺地址直接 fail-fast 拒绝构建产物）
+- **自动更新走 Uplink 正式环境（`https://uplink.internal.hanfatong.com`，应用标识 `meetily-moss`；dev 环境仅平台组联调用 `https://uplink.dev.hanfatong.com`）**，不走 GitHub Releases。代码内缺省值指向 dev（本地 `tauri dev` 联调），**分发包由 CI 环境变量烘焙生产地址**——本地出分发包必须显式设 `NEXT_PUBLIC_UPLINK_BASE_URL`/`MEETILY_UPLINK_BASE_URL` 为生产地址。`createUpdaterArtifacts: true`——updater 制品（`.exe.sig` / `.app.tar.gz`+`.sig`）由 CI 的 `TAURI_SIGNING_PRIVATE_KEY` secret 签名（minisign 私钥存 uplink 仓库 `apps/.dev-credentials/meetily-moss.minisign.key`，密码为空；公钥已登记平台，**不可更换**）。本地 `tauri build` 需先 `export TAURI_SIGNING_PRIVATE_KEY=$(cat <私钥路径)`，且必须设 `NEXT_PUBLIC_UPLINK_BASE_URL` + `MEETILY_UPLINK_BASE_URL`（前端 `resolveBaseUrl` 打包态缺地址直接 fail-fast 拒绝构建产物）
 - updater 接入形态：npm `@uplink/updater-sdk`（Aliyun 私源，`frontend/.npmrc` 声明 scope，CI 用 `NPM_UPLINK_TOKEN` secret 认证）+ Rust 侧 vendored crate `frontend/src-tauri/vendor/uplink-updater-tauri/`（源自 codeup tag `uplink-updater-tauri-v0.9.1`，与 npm 版本强制对齐，升级=重新 vendor）；合规 UX 用 SDK 内置面板（`mountUpdatePanel`，根部 off-screen 宿主 + About 页可见卡片），勿再手写更新弹窗
 - `frontend/src-tauri/binaries/` 是 gitignore 的构建产物目录（ffmpeg 由 build.rs 自动下载缓存；llama-helper 由 CI 编译后拷入）；本地 `cargo check` 只需占位文件，CI 不用管
 - macOS 打包走 `macos-latest` runner（Apple Silicon），x86_64 是交叉编译——Rust target 由 workflow 的 `dtolnay/rust-toolchain` 和 tauri args 统一处理，本地无需额外配置
@@ -102,14 +102,15 @@ unzip -oq pkg.zip   # 解压后按路径取 exe/dmg
 CI 构建只出制品；上传与发布在本地（办公网）执行，凭据在 uplink 仓库 `apps/.dev-credentials/`（`meetily-moss.ci-token` 上传 / `meetily-moss.agent-token` 发布）：
 
 ```bash
-UPLINK=https://uplink.dev.hanfatong.com
+UPLINK=https://uplink.internal.hanfatong.com
 # 1. 下载三包制品解压到 dist/（win-x64 exe+sig、mac 双架构 dmg+app.tar.gz+sig）
 # 2. SDK 版本核对（npm 私源最新版 vs package.json；crate tag 同步核对）
 node -p "require('./frontend/node_modules/@uplink/updater-sdk/package.json').version" && npm view @uplink/updater-sdk version
 # 3. 三步上传（首装包齐套门禁；平台注册全集 win-x64,mac-x64,mac-arm64）
 npx @uplink/updater-sdk upload dist --app meetily-moss --version <v> --base-url $UPLINK \
   --token $(cat <ci-token>) --signed --expect-platforms win-x64,mac-x64,mac-arm64
-# 4. 沙盒对拍 11 用例 + 发布上线（submit → go-full；--market 上架市场门户）
+# 4. 沙盒对拍 + 发布上线（submit → go-full；--market 上架市场门户）
+#    生产凭据：uplink-onboard skill 目录 .env（全局高危型，可传包+发布；泄露即控制台 rotate）
 npx @uplink/updater-sdk sandbox --init-cases   # 填参后 --cases 跑矩阵
 npx @uplink/updater-sdk release <releaseId> --base-url $UPLINK --token $(cat <agent-token>) \
   --notes "<发布说明>" --expect-app meetily-moss --expect-version <v> --go-full --market
