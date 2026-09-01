@@ -1,2 +1,13 @@
+# pnpm 10+ 的设置文件（settings 不再读 package.json 的 pnpm 字段）：
+# - overrides 自 package.json 迁入（pnpm 11 起旧位置被静默忽略——BlockNote 的
+#   ProseMirror 解析依赖这些钉版，丢失会导致前端构建漂移）
+# - minimumReleaseAgeExclude 由 pnpm 11 自动登记（@uplink/updater-sdk 发布未满
+#   新包观察期，非 strict 模式放行并记录）
+overrides:
+  prosemirror-model: 1.25.3
+  prosemirror-state: 1.4.3
+  prosemirror-view: 1.41.3
+  prosemirror-transform: 1.10.4
+  prosemirror-tables: 1.8.1
 minimumReleaseAgeExclude:
   - '@uplink/updater-sdk@0.9.1'

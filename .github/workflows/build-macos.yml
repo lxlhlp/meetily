@@ -88,7 +88,8 @@ jobs:
       - name: Get pnpm store directory
         shell: bash
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+          # pnpm 11 在包目录外执行 store path 返回空，须进入 frontend/ 再取
+          echo "STORE_PATH=$(cd frontend && pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
         uses: actions/cache@v4
