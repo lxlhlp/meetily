@@ -42,6 +42,7 @@ cargo test --manifest-path frontend/src-tauri/Cargo.toml --lib moss
 - dev 出现 ChunkLoadError/白屏 = `.next` 或 WKWebView 缓存过期 → `npm run dev:clean`
 - Rust 日志：已切到 `tauri-plugin-log`（lib.rs 注册，替换原 env_logger）。dev 输出 stdout + 文件；打包版只写文件：macOS `~/Library/Logs/com.meetily.ai/meetily.log`、Windows `%APPDATA%\com.meetily.ai\logs\meetily.log`（10MB 轮转）。级别读 `RUST_LOG`（缺省 info）。设置页有「打开日志目录」按钮（`open_logs_folder` 命令）
 - **dev 录音的麦克风权限**：必须从 Terminal.app / iTerm / VS Code 终端跑 `npm run tauri dev`。`tauri dev` 是裸二进制（无 CFBundleIdentifier），TCC 把麦克风权限归因到父终端 App——终端类 App 声明了 `NSMicrophoneUsageDescription` 可正常弹窗授权（授权一次终身有效，二进制重建不影响）；从 ZCode/其他未声明该 key 的宿主启动则**静默喂全零音频**（录音文件 -91dB 纯静音、无报错、无弹窗，`trigger_audio_permission` 自检是假阳性不可信）。症状鉴别：录音文件 volumedetect max=-91dB = 权限静默拒绝
+- **磁盘维护**：Cargo 不回收 target/ 里的旧 hash 产物，tauri dev 每次热重编都留副本（单 app_lib 可积上万份），一个月堆过 39GB。每周有定时清理任务；手动执行 `scripts/cargo-gc.sh`（保留近 7 天产物维持增量缓存，正在编译时自动跳过）。磁盘暴涨先查 `du -sh target/debug/deps`
 
 ## 打包（fork 上的 GitHub Actions）
 
@@ -62,11 +63,11 @@ gh workflow run build-macos.yml  --repo lxlhlp/meetily --ref feat/moss-provider 
 
 | 包 | 文件名 | 说明 |
 |---|---|---|
-| Windows | `meetily_0.4.0_x64-setup.exe`（NSIS，推荐）+ `.msi` | 未签名 → SmartScreen 弹窗选"更多信息 → 仍要运行" |
-| macOS ARM | `meetily_0.4.0_aarch64.dmg` | 未签名未公证 → 首次打开右键 → 打开，或 `xattr -dr com.apple.quarantine` |
-| macOS x64 | `meetily_0.4.0_x64.dmg` | 同上 |
+| Windows | `meetily_0.4.1_x64-setup.exe`（NSIS，推荐）+ `.msi` | 未签名 → SmartScreen 弹窗选"更多信息 → 仍要运行" |
+| macOS ARM | `meetily_0.4.1_aarch64.dmg` | 未签名未公证 → 首次打开右键 → 打开，或 `xattr -dr com.apple.quarantine` |
+| macOS x64 | `meetily_0.4.1_x64.dmg` | 同上 |
 
-- ⚠️ **run ID 顺序坑**：触发顺序 win → arm64 → x64，但 `gh run list` 按时间倒序（最新在前），曾因此把两个 mac 包的 run ID 认反。下载后务必用 artifact 名或 `lipo -info` / `file` 核对架构，命名交付物时带上明确后缀（如 `meetily_0.4.0_mac-arm64-apple-silicon.dmg`）
+- ⚠️ **run ID 顺序坑**：触发顺序 win → arm64 → x64，但 `gh run list` 按时间倒序（最新在前），曾因此把两个 mac 包的 run ID 认反。下载后务必用 artifact 名或 `lipo -info` / `file` 核对架构，命名交付物时带上明确后缀（如 `meetily_0.4.1_mac-arm64-apple-silicon.dmg`）
 - 版本号在 `frontend/src-tauri/tauri.conf.json` 的 `version` 字段，三包共用，打包前需改版本记得先提交
 
 ### 下载（网络慢时的可靠姿势）
@@ -84,17 +85,35 @@ unzip -oq pkg.zip   # 解压后按路径取 exe/dmg
 ### 工作流输入
 
 - `build-type`: debug / release（分发用 release）
-- `sign-build`: 永远 false（fork 无签名 secrets；macOS 的 Apple 证书、Windows 的 DigiCert、updater 私钥都没有）
+- `sign-build`: 永远 false（OS 级签名 secrets 没有；**updater 的 minisign 签名与此无关，恒开启**）
 - `target`（仅 macOS）: `aarch64-apple-darwin` / `x86_64-apple-darwin`
 - `test-signing`（仅 Windows）: false
 - `upload-artifacts`: true
 
 ### 打包相关配置红线
 
-- `createUpdaterArtifacts: false`（tauri.conf.json）——不要改回 true，否则 tauri build 会因缺 `TAURI_SIGNING_PRIVATE_KEY` 在打包完成后失败
-- updater 端点指向 fork（`lxlhlp/meetily`）——不要指回上游，否则内网版会提示"更新"到官方版
+- **自动更新走 Uplink 平台（dev 环境 `https://uplink.dev.hanfatong.com`，应用标识 `meetily-moss`）**，不走 GitHub Releases。`createUpdaterArtifacts: true`——updater 制品（`.exe.sig` / `.app.tar.gz`+`.sig`）由 CI 的 `TAURI_SIGNING_PRIVATE_KEY` secret 签名（minisign 私钥存 uplink 仓库 `apps/.dev-credentials/meetily-moss.minisign.key`，密码为空；公钥已登记平台，**不可更换**）。本地 `tauri build` 需先 `export TAURI_SIGNING_PRIVATE_KEY=$(cat <私钥路径)`，且必须设 `NEXT_PUBLIC_UPLINK_BASE_URL` + `MEETILY_UPLINK_BASE_URL`（前端 `resolveBaseUrl` 打包态缺地址直接 fail-fast 拒绝构建产物）
+- updater 接入形态：npm `@uplink/updater-sdk`（Aliyun 私源，`frontend/.npmrc` 声明 scope，CI 用 `NPM_UPLINK_TOKEN` secret 认证）+ Rust 侧 vendored crate `frontend/src-tauri/vendor/uplink-updater-tauri/`（源自 codeup tag `uplink-updater-tauri-v0.9.1`，与 npm 版本强制对齐，升级=重新 vendor）；合规 UX 用 SDK 内置面板（`mountUpdatePanel`，根部 off-screen 宿主 + About 页可见卡片），勿再手写更新弹窗
 - `frontend/src-tauri/binaries/` 是 gitignore 的构建产物目录（ffmpeg 由 build.rs 自动下载缓存；llama-helper 由 CI 编译后拷入）；本地 `cargo check` 只需占位文件，CI 不用管
 - macOS 打包走 `macos-latest` runner（Apple Silicon），x86_64 是交叉编译——Rust target 由 workflow 的 `dtolnay/rust-toolchain` 和 tauri args 统一处理，本地无需额外配置
+
+### 发版到 Uplink 平台（stable）
+
+CI 构建只出制品；上传与发布在本地（办公网）执行，凭据在 uplink 仓库 `apps/.dev-credentials/`（`meetily-moss.ci-token` 上传 / `meetily-moss.agent-token` 发布）：
+
+```bash
+UPLINK=https://uplink.dev.hanfatong.com
+# 1. 下载三包制品解压到 dist/（win-x64 exe+sig、mac 双架构 dmg+app.tar.gz+sig）
+# 2. SDK 版本核对（npm 私源最新版 vs package.json；crate tag 同步核对）
+node -p "require('./frontend/node_modules/@uplink/updater-sdk/package.json').version" && npm view @uplink/updater-sdk version
+# 3. 三步上传（首装包齐套门禁；平台注册全集 win-x64,mac-x64,mac-arm64）
+npx @uplink/updater-sdk upload dist --app meetily-moss --version <v> --base-url $UPLINK \
+  --token $(cat <ci-token>) --signed --expect-platforms win-x64,mac-x64,mac-arm64
+# 4. 沙盒对拍 11 用例 + 发布上线（submit → go-full；--market 上架市场门户）
+npx @uplink/updater-sdk sandbox --init-cases   # 填参后 --cases 跑矩阵
+npx @uplink/updater-sdk release <releaseId> --base-url $UPLINK --token $(cat <agent-token>) \
+  --notes "<发布说明>" --expect-app meetily-moss --expect-version <v> --go-full --market
+```
 
 ## 约定
 
