@@ -110,7 +110,8 @@ node -p "require('./frontend/node_modules/@uplink/updater-sdk/package.json').ver
 npx @uplink/updater-sdk upload dist --app meetily-moss --version <v> --base-url $UPLINK \
   --token $(cat <ci-token>) --signed --expect-platforms win-x64,mac-x64,mac-arm64
 # 4. 沙盒对拍 + 发布上线（submit → go-full；--market 上架市场门户）
-#    生产凭据：uplink-onboard skill 目录 .env（全局高危型，可传包+发布；泄露即控制台 rotate）
+#    生产凭据：控制台「凭据管理」按需生成（CI 上传型 + agent 操作型，绑定 meetily-moss），
+#    自助生成自助保管（勿长期持有全局高危型；泄露即控制台 rotate）
 npx @uplink/updater-sdk sandbox --init-cases   # 填参后 --cases 跑矩阵
 npx @uplink/updater-sdk release <releaseId> --base-url $UPLINK --token $(cat <agent-token>) \
   --notes "<发布说明>" --expect-app meetily-moss --expect-version <v> --go-full --market
