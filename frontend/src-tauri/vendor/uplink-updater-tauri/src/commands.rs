@@ -6,7 +6,8 @@ use tauri::{ipc::Channel, AppHandle, Manager, Runtime};
 use tauri_plugin_updater::Update;
 
 use super::{
-    arch_of, build_updater, device_id, platform_of, DownloadedBytes, UplinkConfig, UplinkState,
+    arch_of, build_updater, device_id, platform_of, read_installed_version, write_installed_version,
+    BackfillEntry, DownloadedBytes, LedgerEntry, UplinkConfig, UplinkState,
 };
 
 /// 下载进度事件（serde 形状与 JS 层 RustDownloadEvent 对齐）
@@ -61,13 +62,51 @@ pub async fn uplink_check(
             let version = update.version.clone().to_string();
             let rid = app.resources_table().add(update);
             *state.update_rid.lock().unwrap() = Some(rid);
+            *state.last_target_version.lock().unwrap() = Some(version.clone());
             Ok(Some(serde_json::json!({ "version": version })))
         }
         None => {
             *state.update_rid.lock().unwrap() = None;
+            *state.last_target_version.lock().unwrap() = None;
             Ok(None)
         }
     }
+}
+
+/// 安装版本取值（V1.4 板块十一 RULE-PRM-003 按级短路）：落账（基准=当前内嵌串）→
+/// 回填缓存（基准相符）→ 包内嵌串兜底。仅用于关于页显示——判定/遥测自报恒为内嵌串。
+#[tauri::command]
+pub async fn uplink_get_installed_version(app: AppHandle<impl Runtime>) -> Result<String, String> {
+    let embedded = app.package_info().version.to_string();
+    let store = read_installed_version(&app);
+    if let Some(ledger) = &store.ledger {
+        if ledger.embedded_base == embedded {
+            return Ok(ledger.version.clone());
+        }
+    }
+    if let Some(backfill) = &store.backfill {
+        if backfill.reported_base == embedded {
+            return Ok(backfill.version.clone());
+        }
+    }
+    Ok(embedded)
+}
+
+/// JS 层经 webview fetch 拿到 manifest.json 的安装版本回填后落盘（第二级数据源；
+/// reportedBase 由本侧取当前内嵌串——JS 不感知包版本，保持 Rust 单一事实源）
+#[tauri::command]
+pub async fn uplink_save_installed_backfill(
+    app: AppHandle<impl Runtime>,
+    version: String,
+) -> Result<(), String> {
+    let embedded = app.package_info().version.to_string();
+    let mut store = read_installed_version(&app);
+    store.backfill = Some(BackfillEntry {
+        version,
+        reported_base: embedded,
+    });
+    write_installed_version(&app, &store);
+    Ok(())
 }
 
 /// 下载已发现版本（minisign 验签在插件下载管线内完成；进度经 Channel 推流）
@@ -108,6 +147,16 @@ pub async fn uplink_download(
         .map_err(|e| e.to_string())?;
     let bytes_rid = app.resources_table().add(DownloadedBytes(bytes));
     *state.bytes_rid.lock().unwrap() = Some(bytes_rid);
+    // V1.4 板块十一 RULE-PRM-003：安装版本落账（应答目标串 + 内嵌基准串）——安装完成
+    // 重启后关于页立即显示新串（含晋升包：内嵌=源串、显示=新串），不依赖联网回填
+    if let Some(target) = state.last_target_version.lock().unwrap().clone() {
+        let mut store = read_installed_version(&app);
+        store.ledger = Some(LedgerEntry {
+            version: target,
+            embedded_base: app.package_info().version.to_string(),
+        });
+        write_installed_version(&app, &store);
+    }
     Ok(())
 }
 

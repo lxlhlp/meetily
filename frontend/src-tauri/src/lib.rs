@@ -468,7 +468,7 @@ pub fn run() {
                 .unwrap_or("https://uplink.dev.hanfatong.com")
                 .to_string(),
             "meetily-moss".into(),
-            "0.9.1".into(), // clientUpdaterVersion（与前端 @uplink/updater-sdk 版本对齐）
+            "0.9.4".into(), // clientUpdaterVersion（与前端 @uplink/updater-sdk 版本对齐）
         ))
         .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
@@ -589,6 +589,8 @@ pub fn run() {
             uplink_updater::uplink_check,
             uplink_updater::uplink_download,
             uplink_updater::uplink_install_and_relaunch,
+            uplink_updater::uplink_get_installed_version,
+            uplink_updater::uplink_save_installed_backfill,
             start_recording,
             stop_recording,
             is_recording,

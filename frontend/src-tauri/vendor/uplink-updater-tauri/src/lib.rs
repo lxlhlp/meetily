@@ -15,7 +15,7 @@
 //! tauri::Builder::default()
 //!     .plugin(tauri_plugin_updater::Builder::new().build())
 //!     .plugin(uplink_updater::uplink_updater_plugin(
-//!         "http://localhost:3000".into(),  // UPLINK_BASE_URL（生产由构建注入；勿硬编码镜像——红线 2）
+//!         "https://uplink.internal.hanfatong.com".into(),  // UPLINK_BASE_URL 平台生产地址（由构建注入；勿硬编码镜像——红线 2）
 //!         "my-app".into(),                  // 平台应用标识
 //!         "1.0.0".into(),                   // 更新模块版本（clientUpdaterVersion）
 //!     ))
@@ -68,6 +68,56 @@ struct UplinkState {
     update_rid: Mutex<Option<ResourceId>>,
     /// download 得到的字节资源句柄（install 用）
     bytes_rid: Mutex<Option<ResourceId>>,
+    /// check 命中的目标版本串（download 完成时写安装版本落账，V1.4 板块十一）
+    last_target_version: Mutex<Option<String>>,
+}
+
+/// 安装版本存储（V1.4 板块十一 RULE-PRM-003 / DICT-PRM-004）：
+/// `{app_data_dir}/uplink-installed-version.json`（ledger 第一级 / backfill 第二级，
+/// 各附基准串；当前包内嵌串 ≠ 基准即作废——与 electron 层同构）
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledVersionStore {
+    pub ledger: Option<LedgerEntry>,
+    pub backfill: Option<BackfillEntry>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerEntry {
+    pub version: String,
+    pub embedded_base: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillEntry {
+    pub version: String,
+    pub reported_base: String,
+}
+
+fn installed_version_path<R: Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("app data dir 不可用")
+        .join("uplink-installed-version.json")
+}
+
+fn read_installed_version<R: Runtime>(app: &AppHandle<R>) -> InstalledVersionStore {
+    std::fs::read_to_string(installed_version_path(app))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_installed_version<R: Runtime>(app: &AppHandle<R>, store: &InstalledVersionStore) {
+    if let Some(dir) = installed_version_path(app).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(
+        installed_version_path(app),
+        serde_json::to_string(store).unwrap_or_default(),
+    );
 }
 
 /// 平台枚举映射（Tauri OS 常量 → 平台契约 win/mac/linux）
@@ -190,6 +240,7 @@ pub fn uplink_updater_plugin<R: Runtime>(
                 device_id: Mutex::new(None),
                 update_rid: Mutex::new(None),
                 bytes_rid: Mutex::new(None),
+                last_target_version: Mutex::new(None),
             });
             Ok(())
         })
@@ -199,6 +250,6 @@ pub fn uplink_updater_plugin<R: Runtime>(
 pub mod commands;
 
 pub use commands::{
-    uplink_check, uplink_config, uplink_download, uplink_install_and_relaunch, uplink_set_channel,
-    DownloadEvent,
+    uplink_check, uplink_config, uplink_download, uplink_get_installed_version,
+    uplink_install_and_relaunch, uplink_save_installed_backfill, uplink_set_channel, DownloadEvent,
 };

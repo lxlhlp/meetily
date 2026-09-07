@@ -133,8 +133,8 @@ importers:
         specifier: ^4.17.13
         version: 4.17.24
       '@uplink/updater-sdk':
-        specifier: ^0.9.1
-        version: 0.9.1(@tauri-apps/api@2.11.0)
+        specifier: ^0.9.4
+        version: 0.9.4(@tauri-apps/api@2.11.0)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1917,8 +1917,8 @@ packages:
   '@uplink/contract@0.1.2':
     resolution: {integrity: sha512-Z5lvJodH8k6o1QRh5RzRLjOCLwv2rijXnm6/jDZ2YTjowcmtiHq126IduZQsZ1iRG3RkkxqKb38GxlzOxAoDcw==, tarball: https://packages.aliyun.com/600928eb57a5c7b95a42ac89/npm/repo-jtpde/@uplink/contract/-/@uplink/contract-0.1.2.tgz}
 
-  '@uplink/updater-sdk@0.9.1':
-    resolution: {integrity: sha512-99hxC/AWKpLi6Hbx+Fyvan++TuEuriiLPnJ+IoALsPc7RwnqLEHwdo+/EfWiqqB51rtNlIrwSPRDKAefICuutw==, tarball: https://packages.aliyun.com/600928eb57a5c7b95a42ac89/npm/repo-jtpde/@uplink/updater-sdk/-/@uplink/updater-sdk-0.9.1.tgz}
+  '@uplink/updater-sdk@0.9.4':
+    resolution: {integrity: sha512-MvYlghfLxUprIJbhag+JE+3IEQFEk87zdHvdeWtFUsiBRUW3W1d4q53LmcsYcRHEHTyM85pJB9cRQ5S7WTk14g==, tarball: https://packages.aliyun.com/600928eb57a5c7b95a42ac89/npm/repo-jtpde/@uplink/updater-sdk/-/@uplink/updater-sdk-0.9.4.tgz}
     engines: {node: '>=18.17'}
     hasBin: true
     peerDependencies:
@@ -2956,10 +2956,10 @@ packages:
       '@types/hast': ^3.0.0
       highlight.js: ^11.9.0
       lowlight: ^3.1.0
-      prosemirror-model: ^1.19.3
-      prosemirror-state: ^1.4.3
-      prosemirror-transform: ^1.8.0
-      prosemirror-view: ^1.32.4
+      prosemirror-model: 1.25.3
+      prosemirror-state: 1.4.3
+      prosemirror-transform: 1.10.4
+      prosemirror-view: 1.41.3
       refractor: ^5.0.0
       sugar-high: ^0.6.1 || ^0.7.0 || ^0.8.0 || ^0.9.0
     peerDependenciesMeta:
@@ -3005,9 +3005,9 @@ packages:
   prosemirror-paste-rules@3.0.0:
     resolution: {integrity: sha512-p2ayp2xtSTtDPZutoxZyK6UKJhJk0hEpIfdfVYfd3DSENE1Lyrcg96pju+ClgwXlTjPUykXx5DrsfRbHCY+gGQ==}
     peerDependencies:
-      prosemirror-model: ^1.22.1
-      prosemirror-state: ^1.4.2
-      prosemirror-view: ^1.33.8
+      prosemirror-model: 1.25.3
+      prosemirror-state: 1.4.3
+      prosemirror-view: 1.41.3
 
   prosemirror-schema-basic@1.2.4:
     resolution: {integrity: sha512-ELxP4TlX3yr2v5rM7Sb70SqStq5NvI15c0j9j/gjsrO5vaw+fnnpovCLEGIcpeGfifkuqJwl4fon6b+KdrODYQ==}
@@ -3021,9 +3021,9 @@ packages:
   prosemirror-suggest@3.0.0:
     resolution: {integrity: sha512-cEYnJHOAnQ+ET7PKY1tY8SMSpyR2rQAuYfPEmVtet0V9exgHAeiaSEzyBcCSeLesxXJRIv8b9cofyqoqyMjlEw==}
     peerDependencies:
-      prosemirror-model: ^1.22.1
-      prosemirror-state: ^1.4.2
-      prosemirror-view: ^1.33.8
+      prosemirror-model: 1.25.3
+      prosemirror-state: 1.4.3
+      prosemirror-view: 1.41.3
 
   prosemirror-tables@1.8.1:
     resolution: {integrity: sha512-DAgDoUYHCcc6tOGpLVPSU1k84kCUWTWnfWX3UDy2Delv4ryH0KqTD6RBI6k4yi9j9I8gl3j8MkPpRD/vWPZbug==}
@@ -3031,9 +3031,9 @@ packages:
   prosemirror-trailing-node@3.0.0:
     resolution: {integrity: sha512-xiun5/3q0w5eRnGYfNlW1uU9W6x5MoFKWwq/0TIRgt09lv7Hcser2QYV8t4muXbEr+Fwo0geYn79Xs4GKywrRQ==}
     peerDependencies:
-      prosemirror-model: ^1.22.1
-      prosemirror-state: ^1.4.2
-      prosemirror-view: ^1.33.8
+      prosemirror-model: 1.25.3
+      prosemirror-state: 1.4.3
+      prosemirror-view: 1.41.3
 
   prosemirror-transform@1.10.4:
     resolution: {integrity: sha512-pwDy22nAnGqNR1feOQKHxoFkkUtepoFAd3r2hbEDsnf4wp57kKA36hXsB3njA9FtONBEwSDnDeCiJe+ItD+ykw==}
@@ -3474,9 +3474,9 @@ packages:
     resolution: {integrity: sha512-NpM99WSdD4Fx4if5xOMDpPtU3oAmTSjlzh5U4353ABbRHl1HtAFUx6HlebLZfyFxXN9jzKMDkVbcRjqOZVkYQg==}
     engines: {node: '>=16.0.0', npm: '>=8.0.0'}
     peerDependencies:
-      prosemirror-model: ^1.7.1
-      prosemirror-state: ^1.2.3
-      prosemirror-view: ^1.9.10
+      prosemirror-model: 1.25.3
+      prosemirror-state: 1.4.3
+      prosemirror-view: 1.41.3
       y-protocols: ^1.0.1
       yjs: ^13.5.38
 
@@ -5604,7 +5604,7 @@ snapshots:
 
   '@uplink/contract@0.1.2': {}
 
-  '@uplink/updater-sdk@0.9.1(@tauri-apps/api@2.11.0)':
+  '@uplink/updater-sdk@0.9.4(@tauri-apps/api@2.11.0)':
     dependencies:
       '@uplink/contract': 0.1.2
     optionalDependencies:

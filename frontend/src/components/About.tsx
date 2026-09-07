@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from '@tauri-apps/api/core';
-import { getVersion } from '@tauri-apps/api/app';
 import Image from 'next/image';
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { mountUpdatePanel } from '@uplink/updater-sdk/ui';
@@ -15,8 +14,8 @@ export function About() {
     const updatePanelHostRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        // Get current version on mount
-        getVersion().then(setCurrentVersion).catch(console.error);
+        // SDK 0.9.3 口径：落账→回填→内嵌三级取值（晋升包安装后显示新串而非内嵌源串）
+        updater.getInstalledVersion().then(setCurrentVersion).catch(console.error);
     }, []);
 
     // Uplink 更新面板卡片（合规 UX 设置区：同意开关默认不勾选/手动检查/版本与机器码展示；

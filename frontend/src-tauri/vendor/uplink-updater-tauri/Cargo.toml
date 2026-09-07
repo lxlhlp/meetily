@@ -1,6 +1,6 @@
 [package]
 name = "uplink-updater-tauri"
-version = "0.9.1"
+version = "0.9.4"
 edition = "2021"
 description = "Uplink 更新平台 Tauri 宿主 Rust 侧（@uplink/updater-sdk/tauri 配套：动态端点 + deviceId + minisign 验签命令集）"
 license = "UNLICENSED"
