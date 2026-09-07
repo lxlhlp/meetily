@@ -185,6 +185,23 @@ impl RecordingManager {
                             .map(|age| age > STALL_THRESHOLD)
                             .unwrap_or(true);
                         if is_stalled && !*stalled {
+                            // macOS/Windows quirk: an idle output path can
+                            // make the capture stream deliver no buffers at
+                            // all (sleeping process tap / idle WASAPI
+                            // endpoint), which looks exactly like a dead
+                            // stream to this heartbeat check. Only alarm when
+                            // the output device is actually in use — i.e.
+                            // audio is playing and SHOULD be reaching us.
+                            // Mic streams don't have this failure mode.
+                            if matches!(device_type, DeviceType::System)
+                                && !super::capture::output_activity::default_output_device_is_running()
+                            {
+                                log::debug!(
+                                    "{:?} stream idle but output device not running — nothing playing, suppressing stall alarm",
+                                    device_type
+                                );
+                                continue;
+                            }
                             *stalled = true;
                             log::error!(
                                 "🔇 {:?} stream STALLED: no audio chunks for >{}s while recording (silent capture failure)",

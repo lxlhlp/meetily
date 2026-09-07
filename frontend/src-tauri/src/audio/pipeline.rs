@@ -456,6 +456,11 @@ impl AudioCapture {
             data.to_vec()
         };
 
+        // Live UI waveform telemetry: measure the raw pre-enhancement signal
+        // (before resampling/RNNoise/normalization) so the bars reflect what
+        // the device actually picks up. Lock-free, safe on the audio thread.
+        super::live_input_level::note_chunk(&self.device_type, &mono_data);
+
         // CRITICAL FIX: Resample to 48kHz if device uses different sample rate
         // This fixes Bluetooth devices (like Sony WH-1000XM4) that report 16kHz or 44.1kHz
         // Without this, audio is sped up 3x and VAD fails

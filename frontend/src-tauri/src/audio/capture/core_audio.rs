@@ -380,6 +380,35 @@ impl Drop for CoreAudioStream {
     }
 }
 
+/// Whether the default output device is running IO in at least one process on
+/// the system — i.e., some app is actually playing audio right now.
+///
+/// Used by the recording stall watchdog: an idle process tap delivers no
+/// buffers at all while nothing is playing (observed on macOS 26.x), which is
+/// indistinguishable from a dead capture stream by heartbeat alone. When the
+/// output device isn't running there is simply nothing to capture, so a
+/// "stall" in that state must not alarm the user.
+///
+/// Errors fail open (`true`): if the state can't be determined, keep the old
+/// behavior and let the watchdog alarm.
+#[cfg(target_os = "macos")]
+pub fn default_output_device_is_running() -> bool {
+    let device = match ca::System::default_output_device() {
+        Ok(device) => device,
+        Err(e) => {
+            warn!("⚠️ CoreAudio: running-state check failed to get default output device: {:?} — assuming active", e);
+            return true;
+        }
+    };
+    match device.bool_prop(&ca::PropSelector::DEVICE_IS_RUNNING_SOMEWHERE.global_addr()) {
+        Ok(running) => running,
+        Err(e) => {
+            warn!("⚠️ CoreAudio: failed to query output device running state: {:?} — assuming active", e);
+            true
+        }
+    }
+}
+
 // Stub implementations for non-macOS platforms
 #[cfg(not(target_os = "macos"))]
 pub struct CoreAudioCapture;
@@ -417,6 +446,7 @@ impl Stream for CoreAudioStream {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +472,15 @@ mod tests {
 
         info!("Collected {} samples", sample_count);
         assert!(sample_count >= 48000);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore] // Only run manually as it queries live audio hardware
+    fn test_default_output_device_is_running() {
+        // Expect `false` on an idle desktop, `true` while any app plays audio.
+        // Reading this property does not require audio capture permission.
+        let running = default_output_device_is_running();
+        println!("default output device running somewhere: {}", running);
     }
 }
