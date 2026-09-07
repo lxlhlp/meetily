@@ -1,6 +1,6 @@
 [package]
 name = "meetily"
-version = "0.4.3"  # 与 tauri.conf.json 对齐
+version = "0.4.4"  # 与 tauri.conf.json 对齐
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
