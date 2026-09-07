@@ -21,18 +21,34 @@ const BAR_COUNT = 3;
 const MIN_BAR_HEIGHT = 4;  // px — idle/floor height, matches the old static look
 const MAX_BAR_HEIGHT = 28; // px
 
-// Same log curve as AudioLevelMeter: quiet speech still shows visible movement
-function levelToLog(level: number): number {
-  const clamped = Math.max(0, Math.min(1, level));
-  return clamped > 0 ? Math.log10(clamped * 9 + 1) : 0;
+// Raw pre-enhancement speech sits far below full scale (RMS ≈ -34~-22dB), so
+// the mapping must be in the dB domain with a practical floor/ceiling — the
+// old log10(9x+1) curve assumed 0~1 full-range input and compressed normal
+// speech into 4~10px of travel.
+const RMS_DB_FLOOR = -50;
+const RMS_DB_CEIL = -10;
+const PEAK_DB_FLOOR = -40;
+const PEAK_DB_CEIL = -3;
+
+function dbNorm(level: number, floorDb: number, ceilDb: number): number {
+  if (level <= 0) return 0;
+  const db = 20 * Math.log10(level);
+  return Math.max(0, Math.min(1, (db - floorDb) / (ceilDb - floorDb)));
+}
+
+// Peak follows syllable onsets, RMS carries sustained loudness — the blend
+// makes the bars move with speech rhythm instead of hovering near the floor.
+function deviceLevel(d: LiveDeviceLevel): number {
+  return 0.6 * dbNorm(d.rms, RMS_DB_FLOOR, RMS_DB_CEIL)
+       + 0.4 * dbNorm(d.peak, PEAK_DB_FLOOR, PEAK_DB_CEIL);
 }
 
 function levelToHeight(level: number): number {
-  return MIN_BAR_HEIGHT + levelToLog(level) * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
+  return MIN_BAR_HEIGHT + level * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
 }
 
 function levelToPercent(level: number): number {
-  return Math.round(levelToLog(level) * 100);
+  return Math.round(level * 100);
 }
 
 /**
@@ -60,9 +76,10 @@ export function LiveLevelWaveform({
         unlisten = await listen<LiveAudioLevelEvent>('live-audio-level', (event) => {
           if (cancelled) return;
           const { mic, system } = event.payload;
-          const combined = Math.max(mic.rms, system.rms);
-          setLevels((prev) => [...prev.slice(1), combined]);
-          setLatest({ mic: mic.rms, system: system.rms });
+          const micLevel = deviceLevel(mic);
+          const systemLevel = deviceLevel(system);
+          setLevels((prev) => [...prev.slice(1), Math.max(micLevel, systemLevel)]);
+          setLatest({ mic: micLevel, system: systemLevel });
         });
       } catch (err) {
         console.error('Failed to listen to live-audio-level:', err);
